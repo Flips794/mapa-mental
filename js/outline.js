@@ -176,7 +176,12 @@ function parseOutline(text){
   });
   if(!root) return {ok:false, error:'Nenhum tópico encontrado no texto.'};
   if(synthetic){
-    if(root.children.length===1 && !root.noteLines.length){ root=root.children[0]; synthetic=false; }
+    const k=root.children;
+    if(k.length===1 && !root.noteLines.length){ root=k[0]; synthetic=false; }
+    // "Título" solto na primeira linha (sem filhos) seguido de ramos: ele é o tópico central
+    else if(k.length>1 && !root.noteLines.length && !k[0].children.length && !k[0].noteLines.length && k.slice(1).some(c=>c.children.length)){
+      const title=k.shift(); title.children=k; root=title; synthetic=false;
+    }
   }
   return {ok:true, root, synthetic, lineNodes};
 }
@@ -209,6 +214,8 @@ function buildFromParsed(res, oldRoot){
     const n = old ? Object.assign(mk(''),{id:old.id, attachments:old.attachments||[]}) : mk('');
     idOf.set(p,n.id);
     n.html=mdInline(p.text);
+    // texto sem "# título": o mapa mantém o nome que já tinha (nunca fica "Sem título")
+    if(level===0 && res.synthetic && isEmptyHtml(n.html)) n.html = (oldRoot && !isEmptyHtml(oldRoot.html)) ? oldRoot.html : 'Mapa mental';
     n.note=linesToNote(p.noteLines);
     n.links=resolveLinks(p);
     n.collapsed = level>0 && !!p.collapsed;

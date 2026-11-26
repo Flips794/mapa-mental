@@ -313,6 +313,29 @@ $('#zoomIn').addEventListener('click',()=>zoomAt(1.2));
 $('#zoomOut').addEventListener('click',()=>zoomAt(1/1.2));
 $('#zoomPct').addEventListener('click',()=>zoomAt(1/view.z));
 $('#fitBtn').addEventListener('click',()=>fit(true));
+
+/* ---------- Recolher / expandir tudo ---------- */
+function setAllCollapsed(collapse){
+  if(!M) return;
+  if(editingId) endInlineEdit();
+  let changed=false;
+  (function w(n){ n.children.forEach(c=>{ if(c.children.length && c.collapsed!==collapse) changed=true; w(c); }); })(M.root);
+  if(!changed){ toast(collapse ? 'Já está tudo recolhido.' : 'Já está tudo expandido.'); return; }
+  pushHistory();
+  // recolher: todo tópico com filhos fecha (o central nunca), então só os ramos principais ficam à vista
+  (function w(n){ n.children.forEach(c=>{ c.collapsed = collapse && c.children.length>0; w(c); }); })(M.root);
+  // se o tópico selecionado ficou escondido, a seleção sobe para o ramo visível que o contém
+  if(collapse && selectedId && selectedId!==M.root.id){
+    const path=[]; (function find(n,acc){ if(n.id===selectedId){ path.push(...acc); return true; } return n.children.some(c=>find(c,acc.concat(c))); })(M.root,[]);
+    const firstClosed=path.slice(0,-1).find(n=>n.collapsed);
+    if(firstClosed) selectedId=firstClosed.id;
+  }
+  fastIndex=null;
+  render(); fit(true); saveSoon();
+  toast(collapse ? 'Tudo recolhido · clique no número de um ramo para abrir' : 'Tudo expandido');
+}
+$('#collapseAllBtn').addEventListener('click',()=>setAllCollapsed(true));
+$('#expandAllBtn').addEventListener('click',()=>setAllCollapsed(false));
 $('#keysBtn').addEventListener('click',()=>$('#keysPop').classList.toggle('hidden'));
 
 /* ================= Ponteiro ================= */

@@ -44,6 +44,7 @@ Botão de lua/sol no topo. Na primeira visita segue o tema do sistema.
 - Tópico central com ramos dos dois lados, cada ramo com sua cor
 - Canvas livre: arraste o fundo (ou use a roda do mouse) para mover; `Ctrl + roda` para zoom
 - Arraste e solte tópicos para reorganizar; desfazer / refazer
+- **Recolher tudo / Expandir tudo** (barra de zoom, canto inferior): recolher deixa só o tópico central e os ramos principais, cada um mostrando quantos tópicos esconde
 - Painel de edição à direita com **negrito**, *itálico*, sublinhado, tachado, listas e links
 - **Link para página de documento**: no painel, use *📄 Vincular*, escolha o documento e a página. No mapa aparece um selo curto (`📄 p.3`); um clique abre o documento direto nessa página
 - Anotações, imagens e arquivos anexos; busca; backup completo em `.json` (inclui anexos)
