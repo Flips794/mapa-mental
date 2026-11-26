@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mapa Mental</title>
+<style>
+  :root{
+    --bg:#f1f5f9; --panel:#ffffff; --ink:#0f172a; --muted:#64748b;
+    --line:#cbd5e1; --link:#94a3b8; --ring:#3b82f6;
+    --grid:#e2e8f0;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--bg);display:flex;flex-direction:column;overflow:hidden;
+  }
+
+  /* ---------- Barra superior ---------- */
+  header{
+    display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex:0 0 auto;z-index:20;flex-wrap:wrap;
+  }
+  header .logo{font-weight:700;font-size:16px;margin-right:6px;display:flex;align-items:center;gap:8px}
+  header .logo .dot{width:14px;height:14px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#ec4899)}
+  .btn{
+    border:1px solid var(--line);background:#fff;color:var(--ink);padding:7px 12px;border-radius:9px;
+    font-size:13px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+  }
+  .btn:hover{background:#f8fafc;border-color:#94a3b8}
+  .btn.primary{background:#4f46e5;border-color:#4f46e5;color:#fff}
+  .btn.primary:hover{background:#4338ca}
+  .spacer{flex:1}
+  .search{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:9px;padding:4px 10px;background:#fff}
+  .search input{border:0;outline:0;font-size:13px;width:150px;background:transparent}
+  .status{font-size:12px;color:var(--muted);min-width:96px;text-align:right}
+
+  /* ---------- Área principal ---------- */
+  main{flex:1;display:flex;min-height:0}
+  #canvas{
+    position:relative;flex:1;overflow:auto;cursor:grab;
+    background-color:var(--bg);
+    background-image:radial-gradient(var(--grid) 1.2px, transparent 1.2px);
+    background-size:22px 22px;
+    padding:60px;
+  }
+  #canvas.panning{cursor:grabbing}
+  #links{position:absolute;top:0;left:0;pointer-events:none;z-index:1;overflow:visible}
+  #tree{position:relative;z-index:2;display:inline-block}
+
+  /* ---------- Nós ---------- */
+  .node{display:flex;align-items:center}
+  .children{display:flex;flex-direction:column;gap:14px;margin-left:46px}
+  .box{
+    position:relative;background:var(--c-bg,#f8fafc);border:1.5px solid var(--c-bd,#e2e8f0);
+    border-left:5px solid var(--c-ac,#64748b);border-radius:12px;padding:9px 12px;
+    min-width:120px;max-width:300px;box-shadow:0 1px 2px rgba(15,23,42,.06);
+    cursor:pointer;transition:box-shadow .12s,transform .12s;
+  }
+  .box:hover{box-shadow:0 4px 12px rgba(15,23,42,.12)}
+  .box.sel{box-shadow:0 0 0 3px rgba(59,130,246,.45),0 4px 12px rgba(15,23,42,.12)}
+  .box.match{outline:3px solid #f59e0b;outline-offset:2px}
+  .title{
+    font-size:14px;line-height:1.35;outline:0;min-height:19px;word-break:break-word;white-space:pre-wrap;
+    font-weight:500;
+  }
+  .title:empty::before{content:"Digite...";color:#cbd5e1}
+  .badges{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;align-items:center}
+  .badge{font-size:12px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:1px 6px;color:var(--muted)}
+  .thumb{width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in}
+  .doc-chip{
+    font-size:12px;background:#fff;border:1px solid var(--line);border-radius:6px;padding:2px 7px;
+    cursor:pointer;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+  }
+  .doc-chip:hover{border-color:#94a3b8;background:#f8fafc}
+  .ctrl{position:absolute;right:-14px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:4px;opacity:0;transition:opacity .12s}
+  .box:hover .ctrl,.box.sel .ctrl{opacity:1}
+  .mini{
+    width:24px;height:24px;border-radius:50%;border:1.5px solid var(--line);background:#fff;color:var(--ink);
+    cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;
+    box-shadow:0 1px 3px rgba(15,23,42,.14);padding:0;
+  }
+  .mini:hover{background:#f1f5f9;border-color:#94a3b8}
+  .mini.toggle{font-size:11px;min-width:24px;width:auto;padding:0 6px;border-radius:12px;gap:2px}
+
+  /* ---------- Inspetor (lateral) ---------- */
+  #inspector{
+    flex:0 0 288px;background:var(--panel);border-left:1px solid var(--line);
+    padding:16px;overflow:auto;display:flex;flex-direction:column;gap:16px
+  }
+  #inspector h3{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .insp-empty{color:var(--muted);font-size:13px;text-align:center;margin-top:40px;line-height:1.6}
+  .field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:600}
+  textarea.note{
+    width:100%;border:1px solid var(--line);border-radius:9px;padding:9px;font-size:13px;font-family:inherit;
+    resize:vertical;min-height:70px;outline:0;color:var(--ink)
+  }
+  textarea.note:focus{border-color:var(--ring)}
+  .swatches{display:flex;flex-wrap:wrap;gap:8px}
+  .swatch{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 1.5px var(--line)}
+  .swatch.on{box-shadow:0 0 0 2.5px var(--ink)}
+  .att-list{display:flex;flex-direction:column;gap:8px}
+  .att{display:flex;align-items:center;gap:9px;border:1px solid var(--line);border-radius:9px;padding:7px}
+  .att img{width:38px;height:38px;object-fit:cover;border-radius:6px;cursor:zoom-in}
+  .att .ic{width:38px;height:38px;border-radius:6px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:18px}
+  .att .meta{flex:1;min-width:0}
+  .att .nm{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .att .sz{font-size:11px;color:var(--muted)}
+  .att .x{border:0;background:transparent;color:var(--muted);cursor:pointer;font-size:16px;padding:2px 4px}
+  .att .x:hover{color:#ef4444}
+  .insp-actions{display:flex;flex-wrap:wrap;gap:8px}
+  .insp-actions .btn{flex:1;justify-content:center;min-width:120px}
+  .btn.danger{color:#dc2626;border-color:#fecaca}
+  .btn.danger:hover{background:#fef2f2}
+  .hidden{display:none}
+  .hint{font-size:11px;color:var(--muted);line-height:1.5}
+
+  /* ---------- Lightbox ---------- */
+  #lightbox{position:fixed;inset:0;background:rgba(15,23,42,.82);display:none;align-items:center;justify-content:center;z-index:100;cursor:zoom-out}
+  #lightbox img{max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+
+  /* ---------- Toast ---------- */
+  #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;
+    padding:10px 18px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:200}
+  #toast.show{opacity:1}
+
+  @media(max-width:760px){ #inspector{position:fixed;right:0;top:0;bottom:0;z-index:30;box-shadow:-8px 0 24px rgba(0,0,0,.12)} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo"><span class="dot"></span>Mapa Mental</div>
+  <button class="btn primary" id="addRoot">＋ Tópico principal</button>
+  <div class="search">🔍<input id="search" placeholder="Buscar..." autocomplete="off"></div>
+  <div class="spacer"></div>
+  <button class="btn" id="importBtn">⬆ Importar</button>
+  <button class="btn" id="exportBtn">⬇ Exportar backup</button>
+  <div class="status" id="status">—</div>
+  <input type="file" id="importFile" accept="application/json,.json" class="hidden">
+</header>
+
+<main>
+  <div id="canvas">
+    <svg id="links"></svg>
+    <div id="tree"></div>
+  </div>
+
+  <aside id="inspector">
+    <div class="insp-empty" id="inspEmpty">
+      Clique em um nó para editá-lo.<br><br>
+      <span class="hint">
+      • <b>+</b> no nó adiciona um sub-tópico<br>
+      • a <b>setinha</b> recolhe / expande os ramos<br>
+      • <b>Enter</b> cria um nó irmão, <b>Tab</b> cria um filho<br>
+      • arraste o fundo para mover o mapa
+      </span>
+    </div>
+
+    <div id="inspBody" class="hidden" style="display:flex;flex-direction:column;gap:16px">
+      <div class="field">
+        <h3>Cor do bloco</h3>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <div class="field">
+        <label>Anotação</label>
+        <textarea class="note" id="note" placeholder="Escreva detalhes, links, observações..."></textarea>
+      </div>
+      <div class="field">
+        <h3>Anexos</h3>
+        <div class="insp-actions" style="margin:8px 0">
+          <button class="btn" id="addImg">🖼 Imagem</button>
+          <button class="btn" id="addDoc">📎 Documento</button>
+        </div>
+        <div class="att-list" id="attList"></div>
+        <input type="file" id="imgFile" accept="image/*" class="hidden">
+        <input type="file" id="docFile" class="hidden">
+      </div>
+      <div class="field">
+        <h3>Ações</h3>
+        <div class="insp-actions" style="margin-top:8px">
+          <button class="btn" id="aChild">＋ Sub-tópico</button>
+          <button class="btn" id="aSibling">＋ Irmão</button>
+          <button class="btn" id="aToggle">↕ Recolher</button>
+          <button class="btn danger" id="aDelete">🗑 Excluir</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<div id="lightbox"><img alt=""></div>
+<div id="toast"></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ================= Paleta de cores ================= */
+const COLORS = {
+  slate:  {bg:'#f8fafc',bd:'#e2e8f0',ac:'#64748b'},
+  red:    {bg:'#fef2f2',bd:'#fecaca',ac:'#ef4444'},
+  orange: {bg:'#fff7ed',bd:'#fed7aa',ac:'#f97316'},
+  amber:  {bg:'#fffbeb',bd:'#fde68a',ac:'#f59e0b'},
+  green:  {bg:'#f0fdf4',bd:'#bbf7d0',ac:'#22c55e'},
+  teal:   {bg:'#f0fdfa',bd:'#99f6e4',ac:'#14b8a6'},
+  blue:   {bg:'#eff6ff',bd:'#bfdbfe',ac:'#3b82f6'},
+  indigo: {bg:'#eef2ff',bd:'#c7d2fe',ac:'#6366f1'},
+  purple: {bg:'#faf5ff',bd:'#e9d5ff',ac:'#a855f7'},
+  pink:   {bg:'#fdf2f8',bd:'#fbcfe8',ac:'#ec4899'},
+};
+
+/* ================= Armazenamento (IndexedDB + fallback) ================= */
+const Store = (()=>{
+  const DB='mapa_mental_db', ST='kv', K='doc'; let dbP=null;
+  function open(){
+    if(dbP) return dbP;
+    dbP=new Promise((res,rej)=>{
+      let r; try{ r=indexedDB.open(DB,1);}catch(e){return rej(e);}
+      r.onupgradeneeded=()=>{ try{r.result.createObjectStore(ST);}catch(e){} };
+      r.onsuccess=()=>res(r.result);
+      r.onerror=()=>rej(r.error);
+    });
+    return dbP;
+  }
+  async function idbGet(){ const db=await open(); return new Promise((res,rej)=>{ const tx=db.transaction(ST,'readonly'); const q=tx.objectStore(ST).get(K); q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+  async function idbSet(v){ const db=await open(); return new Promise((res,rej)=>{ const tx=db.transaction(ST,'readwrite'); tx.objectStore(ST).put(v,K); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+  return {
+    async load(){
+      try{ const v=await idbGet(); if(v) return v; }catch(e){}
+      try{ const s=localStorage.getItem('mapa_mental'); if(s) return JSON.parse(s); }catch(e){}
+      return null;
+    },
+    async save(doc){
+      try{ await idbSet(doc); return true; }catch(e){}
+      try{ localStorage.setItem('mapa_mental', JSON.stringify(doc)); return true; }catch(e){ return false; }
+    }
+  };
+})();
+
+/* ================= Estado ================= */
+let doc, selectedId=null;
+const $=s=>document.querySelector(s);
+const canvas=$('#canvas'), tree=$('#tree'), svg=$('#links');
+
+function genId(){ return 'n'+Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4); }
+function mk(text,color){ return {id:genId(),text:text||'',note:'',color:color||'slate',collapsed:false,attachments:[],children:[]}; }
+function defaultDoc(){
+  const root=mk('Meu Mapa Mental','blue');
+  root.note='Bem-vindo! Este é o seu mapa, salvo automaticamente neste computador.\n\nClique em um nó e use o painel à direita para mudar a cor, escrever anotações ou anexar imagens e documentos.';
+  root.children=[ mk('Projeto Ômega','purple'), mk('Ideias','green'), mk('Referências','amber') ];
+  root.children[0].children=[ mk('Objetivos','purple'), mk('Tarefas','purple') ];
+  return {version:1, root};
+}
+
+/* ================= Busca na árvore ================= */
+function findNode(id, node, parent){
+  node=node||doc.root; parent=parent||null;
+  if(node.id===id) return {node, parent};
+  for(const c of node.children){ const r=findNode(id,c,node); if(r) return r; }
+  return null;
+}
+
+/* ================= Render ================= */
+function el(tag,cls){ const e=document.createElement(tag); if(cls)e.className=cls; return e; }
+
+function render(){
+  tree.innerHTML='';
+  tree.appendChild(renderNode(doc.root));
+  drawLinks();
+  updateInspector();
+}
+
+function renderNode(node){
+  const wrap=el('div','node'); wrap.dataset.id=node.id;
+  const box=el('div','box'); if(node.id===selectedId) box.classList.add('sel');
+  const c=COLORS[node.color]||COLORS.slate;
+  box.style.setProperty('--c-bg',c.bg); box.style.setProperty('--c-bd',c.bd); box.style.setProperty('--c-ac',c.ac);
+
+  const title=el('div','title'); title.contentEditable='true'; title.spellcheck=false; title.textContent=node.text;
+  box.appendChild(title);
+
+  // Selos (anotação / imagens / documentos)
+  const badges=el('div','badges');
+  if(node.note && node.note.trim()){ const b=el('span','badge'); b.textContent='📝'; b.title='Tem anotação'; badges.appendChild(b); }
+  const imgs=node.attachments.filter(a=>a.kind==='image');
+  imgs.slice(0,3).forEach(a=>{ const t=el('img','thumb'); t.src=a.dataUrl; t.alt=a.name; t.dataset.att=a.id; badges.appendChild(t); });
+  if(imgs.length>3){ const m=el('span','badge'); m.textContent='+'+(imgs.length-3)+' imgs'; badges.appendChild(m); }
+  node.attachments.filter(a=>a.kind==='file').forEach(a=>{ const d=el('span','doc-chip'); d.dataset.att=a.id; d.textContent='📎 '+a.name; d.title='Clique para baixar'; badges.appendChild(d); });
+  if(badges.children.length) box.appendChild(badges);
+
+  // Controles
+  const ctrl=el('div','ctrl');
+  const add=el('button','mini add'); add.textContent='+'; add.title='Adicionar sub-tópico'; ctrl.appendChild(add);
+  if(node.children.length){
+    const tg=el('button','mini toggle'); tg.title=node.collapsed?'Expandir':'Recolher';
+    tg.textContent=node.collapsed?('▸ '+node.children.length):'▾';
+    ctrl.appendChild(tg);
+  }
+  box.appendChild(ctrl);
+  wrap.appendChild(box);
+
+  if(node.children.length && !node.collapsed){
+    const ch=el('div','children');
+    node.children.forEach(c=>ch.appendChild(renderNode(c)));
+    wrap.appendChild(ch);
+  }
+  return wrap;
+}
+
+/* ================= Conectores (SVG) ================= */
+let linkRAF=null;
+function scheduleLinks(){ if(linkRAF) return; linkRAF=requestAnimationFrame(()=>{ linkRAF=null; drawLinks(); }); }
+function drawLinks(){
+  const cr=canvas.getBoundingClientRect();
+  const sx=canvas.scrollLeft, sy=canvas.scrollTop;
+  let d='';
+  (function walk(node){
+    if(node.collapsed || !node.children.length) return;
+    const pEl=tree.querySelector('.node[data-id="'+CSS.escape(node.id)+'"] > .box');
+    if(!pEl) return;
+    const pr=pEl.getBoundingClientRect();
+    const px=pr.right-cr.left+sx, py=pr.top+pr.height/2-cr.top+sy;
+    node.children.forEach(ch=>{
+      const cEl=tree.querySelector('.node[data-id="'+CSS.escape(ch.id)+'"] > .box');
+      if(!cEl) return;
+      const rr=cEl.getBoundingClientRect();
+      const cx=rr.left-cr.left+sx, cy=rr.top+rr.height/2-cr.top+sy;
+      const dx=Math.max(22,(cx-px)/2);
+      d+='M'+px+','+py+' C'+(px+dx)+','+py+' '+(cx-dx)+','+cy+' '+cx+','+cy+' ';
+      walk(ch);
+    });
+  })(doc.root);
+  svg.setAttribute('width', canvas.scrollWidth);
+  svg.setAttribute('height', canvas.scrollHeight);
+  svg.innerHTML='<path d="'+d+'" fill="none" stroke="var(--link)" stroke-width="2"/>';
+}
+
+/* ================= Seleção ================= */
+function selectNode(id){
+  selectedId=id;
+  tree.querySelectorAll('.box.sel').forEach(b=>b.classList.remove('sel'));
+  const b=tree.querySelector('.node[data-id="'+CSS.escape(id)+'"] > .box');
+  if(b) b.classList.add('sel');
+  updateInspector();
+}
+function focusTitle(id){
+  const elt=tree.querySelector('.node[data-id="'+CSS.escape(id)+'"] > .box .title');
+  if(!elt) return;
+  elt.focus();
+  const r=document.createRange(); r.selectNodeContents(elt); r.collapse(false);
+  const s=getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+
+/* ================= Operações na árvore ================= */
+function addChild(id){
+  const f=findNode(id); if(!f) return;
+  f.node.collapsed=false;
+  const c=mk('', f.node.color);
+  f.node.children.push(c);
+  selectedId=c.id;
+  render(); focusTitle(c.id); saveSoon();
+}
+function addSibling(id){
+  const f=findNode(id); if(!f) return;
+  if(!f.parent){ addChild(id); return; }
+  const c=mk('', f.node.color);
+  const i=f.parent.children.indexOf(f.node);
+  f.parent.children.splice(i+1,0,c);
+  selectedId=c.id;
+  render(); focusTitle(c.id); saveSoon();
+}
+function deleteNode(id){
+  const f=findNode(id); if(!f) return;
+  if(!f.parent){ toast('Não dá para excluir o nó central.'); return; }
+  const n=countAll(f.node);
+  if(!confirm('Excluir "'+(f.node.text||'(sem título)')+'"'+(n>1?(' e seus '+(n-1)+' sub-itens'):'')+'?')) return;
+  const i=f.parent.children.indexOf(f.node);
+  f.parent.children.splice(i,1);
+  selectedId=f.parent.id;
+  render(); saveSoon();
+}
+function toggleCollapse(id){
+  const f=findNode(id); if(!f||!f.node.children.length) return;
+  f.node.collapsed=!f.node.collapsed;
+  render(); saveSoon();
+}
+function countAll(node){ let n=1; node.children.forEach(c=>n+=countAll(c)); return n; }
+
+/* ================= Delegação de eventos na árvore ================= */
+tree.addEventListener('click', e=>{
+  const nodeEl=e.target.closest('.node'); if(!nodeEl) return;
+  const id=nodeEl.dataset.id;
+  if(e.target.closest('.toggle')){ selectedId=id; toggleCollapse(id); return; }
+  if(e.target.closest('.add')){ addChild(id); return; }
+  if(e.target.closest('.thumb')){ openAtt(id, e.target.dataset.att); return; }
+  const chip=e.target.closest('.doc-chip');
+  if(chip){ openAtt(id, chip.dataset.att); return; }
+  selectNode(id);
+});
+tree.addEventListener('focusin', e=>{
+  if(e.target.classList.contains('title')) selectNode(e.target.closest('.node').dataset.id);
+});
+tree.addEventListener('input', e=>{
+  if(!e.target.classList.contains('title')) return;
+  const f=findNode(e.target.closest('.node').dataset.id); if(!f) return;
+  f.node.text=e.target.textContent;
+  scheduleLinks(); saveSoon();
+});
+tree.addEventListener('keydown', e=>{
+  if(!e.target.classList.contains('title')) return;
+  const id=e.target.closest('.node').dataset.id;
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); e.target.blur(); addSibling(id); }
+  else if(e.key==='Tab'){ e.preventDefault(); e.target.blur(); addChild(id); }
+  else if(e.key==='Escape'){ e.target.blur(); }
+});
+tree.addEventListener('blur', e=>{ if(e.target.classList.contains('title')) render(); }, true);
+
+/* ================= Inspetor ================= */
+const inspEmpty=$('#inspEmpty'), inspBody=$('#inspBody');
+const swatchesBox=$('#swatches'), noteBox=$('#note'), attList=$('#attList');
+
+Object.keys(COLORS).forEach(k=>{
+  const s=el('div','swatch'); s.style.background=COLORS[k].ac; s.dataset.color=k; s.title=k;
+  s.addEventListener('click',()=>{ const f=findNode(selectedId); if(!f)return; f.node.color=k; render(); saveSoon(); });
+  swatchesBox.appendChild(s);
+});
+
+function updateInspector(){
+  const f=selectedId?findNode(selectedId):null;
+  if(!f){ inspEmpty.classList.remove('hidden'); inspBody.classList.add('hidden'); return; }
+  inspEmpty.classList.add('hidden'); inspBody.classList.remove('hidden');
+  swatchesBox.querySelectorAll('.swatch').forEach(s=>s.classList.toggle('on', s.dataset.color===f.node.color));
+  if(document.activeElement!==noteBox) noteBox.value=f.node.note||'';
+  $('#aToggle').textContent = f.node.collapsed ? '↕ Expandir' : '↕ Recolher';
+  $('#aToggle').style.display = f.node.children.length ? '' : 'none';
+  $('#aDelete').style.display = f.parent ? '' : 'none';
+  renderAttList(f.node);
+}
+function renderAttList(node){
+  attList.innerHTML='';
+  if(!node.attachments.length){ attList.innerHTML='<div class="hint">Nenhum anexo ainda.</div>'; return; }
+  node.attachments.forEach(a=>{
+    const row=el('div','att');
+    if(a.kind==='image'){ const im=el('img'); im.src=a.dataUrl; im.alt=a.name; im.addEventListener('click',()=>showLightbox(a.dataUrl)); row.appendChild(im); }
+    else { const ic=el('div','ic'); ic.textContent='📄'; row.appendChild(ic); }
+    const meta=el('div','meta');
+    const nm=el('div','nm'); nm.textContent=a.name; nm.title=a.name;
+    const sz=el('div','sz'); sz.textContent=(a.kind==='image'?'Imagem · ':'Arquivo · ')+fmtSize(a.size);
+    meta.appendChild(nm); meta.appendChild(sz); row.appendChild(meta);
+    const dl=el('button','x'); dl.textContent='⬇'; dl.title='Baixar'; dl.addEventListener('click',()=>download(a)); row.appendChild(dl);
+    const x=el('button','x'); x.textContent='✕'; x.title='Remover'; x.addEventListener('click',()=>{ node.attachments=node.attachments.filter(z=>z.id!==a.id); render(); saveSoon(); }); row.appendChild(x);
+    attList.appendChild(row);
+  });
+}
+function fmtSize(b){ if(!b) return ''; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
+
+noteBox.addEventListener('input',()=>{ const f=findNode(selectedId); if(!f)return; f.node.note=noteBox.value; saveSoon(); });
+noteBox.addEventListener('blur',()=>render());
+$('#aChild').addEventListener('click',()=>selectedId&&addChild(selectedId));
+$('#aSibling').addEventListener('click',()=>selectedId&&addSibling(selectedId));
+$('#aToggle').addEventListener('click',()=>selectedId&&toggleCollapse(selectedId));
+$('#aDelete').addEventListener('click',()=>selectedId&&deleteNode(selectedId));
+
+/* ================= Anexos ================= */
+const imgFile=$('#imgFile'), docFile=$('#docFile');
+$('#addImg').addEventListener('click',()=>imgFile.click());
+$('#addDoc').addEventListener('click',()=>docFile.click());
+imgFile.addEventListener('change',e=>handleFiles(e.target.files,'image'));
+docFile.addEventListener('change',e=>handleFiles(e.target.files,'file'));
+function handleFiles(files, kind){
+  const f=findNode(selectedId); if(!f){ return; }
+  [...files].forEach(file=>{
+    const r=new FileReader();
+    r.onload=()=>{ f.node.attachments.push({id:genId(),kind,name:file.name,size:file.size,mime:file.type,dataUrl:r.result}); render(); saveSoon(); };
+    r.readAsDataURL(file);
+  });
+  imgFile.value=''; docFile.value='';
+}
+function openAtt(nodeId, attId){
+  const f=findNode(nodeId); if(!f) return;
+  const a=f.node.attachments.find(z=>z.id===attId); if(!a) return;
+  if(a.kind==='image') showLightbox(a.dataUrl); else download(a);
+}
+function download(a){ const link=document.createElement('a'); link.href=a.dataUrl; link.download=a.name; document.body.appendChild(link); link.click(); link.remove(); }
+
+/* Lightbox */
+const lightbox=$('#lightbox');
+function showLightbox(src){ lightbox.querySelector('img').src=src; lightbox.style.display='flex'; }
+lightbox.addEventListener('click',()=>{ lightbox.style.display='none'; });
+
+/* ================= Salvamento ================= */
+const statusEl=$('#status'); let saveTimer=null;
+function saveSoon(){ statusEl.textContent='Salvando…'; clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,350); }
+async function saveNow(){
+  const ok=await Store.save(doc);
+  const t=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  statusEl.textContent = ok ? ('Salvo ✓ '+t) : '⚠ Falha ao salvar — use Exportar';
+}
+window.addEventListener('pagehide',()=>{ Store.save(doc); });
+
+/* ================= Exportar / Importar ================= */
+$('#exportBtn').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify(doc,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob); const a=document.createElement('a');
+  const d=new Date().toISOString().slice(0,10);
+  a.href=url; a.download='mapa-mental-'+d+'.json'; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url); toast('Backup exportado!');
+});
+$('#importBtn').addEventListener('click',()=>$('#importFile').click());
+$('#importFile').addEventListener('change',e=>{
+  const file=e.target.files[0]; if(!file) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    try{
+      const parsed=JSON.parse(r.result);
+      if(!parsed || !parsed.root || !parsed.root.id) throw new Error('formato');
+      if(!confirm('Importar este arquivo? Ele substituirá o mapa atual (faça um Exportar antes se quiser guardar o atual).')) return;
+      doc=normalize(parsed); selectedId=doc.root.id; render(); saveNow(); toast('Mapa importado!');
+    }catch(err){ toast('Arquivo inválido.'); }
+  };
+  r.readAsText(file); e.target.value='';
+});
+function normalize(d){
+  function fix(n){ n.id=n.id||genId(); n.text=n.text||''; n.note=n.note||''; n.color=COLORS[n.color]?n.color:'slate'; n.collapsed=!!n.collapsed; n.attachments=Array.isArray(n.attachments)?n.attachments:[]; n.children=Array.isArray(n.children)?n.children:[]; n.children.forEach(fix); }
+  fix(d.root); return d;
+}
+
+/* ================= Busca ================= */
+$('#search').addEventListener('input',e=>{
+  const q=e.target.value.trim().toLowerCase();
+  tree.querySelectorAll('.box.match').forEach(b=>b.classList.remove('match'));
+  if(!q) return;
+  let first=null;
+  (function walk(node){
+    const hit=(node.text||'').toLowerCase().includes(q)||(node.note||'').toLowerCase().includes(q);
+    if(hit){
+      // expande ancestrais
+      let p=findNode(node.id).parent;
+      while(p){ p.collapsed=false; p=findNode(p.id).parent; }
+    }
+    node.children.forEach(walk);
+  })(doc.root);
+  render();
+  (function mark(node){
+    const hit=(node.text||'').toLowerCase().includes(q)||(node.note||'').toLowerCase().includes(q);
+    if(hit){ const b=tree.querySelector('.node[data-id="'+CSS.escape(node.id)+'"] > .box'); if(b){ b.classList.add('match'); if(!first) first=b; } }
+    node.children.forEach(mark);
+  })(doc.root);
+  if(first) first.scrollIntoView({behavior:'smooth',block:'center',inline:'center'});
+});
+
+/* ================= Tópico principal (novo ramo na raiz) ================= */
+$('#addRoot').addEventListener('click',()=>addChild(doc.root.id));
+
+/* ================= Arrastar o fundo para mover ================= */
+let pan=null;
+canvas.addEventListener('pointerdown',e=>{
+  if(e.target!==canvas && e.target!==svg && e.target.tagName!=='path') return;
+  pan={x:e.clientX,y:e.clientY,l:canvas.scrollLeft,t:canvas.scrollTop};
+  canvas.classList.add('panning'); canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove',e=>{ if(!pan) return; canvas.scrollLeft=pan.l-(e.clientX-pan.x); canvas.scrollTop=pan.t-(e.clientY-pan.y); });
+canvas.addEventListener('pointerup',e=>{ pan=null; canvas.classList.remove('panning'); });
+canvas.addEventListener('pointercancel',()=>{ pan=null; canvas.classList.remove('panning'); });
+window.addEventListener('resize',scheduleLinks);
+
+/* ================= Toast ================= */
+let toastTimer=null;
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),2200); }
+
+/* ================= Início ================= */
+(async function init(){
+  doc=await Store.load();
+  if(!doc || !doc.root){ doc=defaultDoc(); }
+  else doc=normalize(doc);
+  selectedId=doc.root.id;
+  render();
+  statusEl.textContent='Pronto ✓';
+  // centraliza um pouco
+  canvas.scrollLeft=0; canvas.scrollTop=Math.max(0,(tree.offsetHeight-canvas.clientHeight)/2+40);
+})();
+
+})();
+</script>
+</body>
+</html>
