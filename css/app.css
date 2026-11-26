@@ -251,7 +251,7 @@ body.mode-map .doc-only{display:none!important}
 .seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px var(--shadow2);font-weight:550}
 
 /* ---------- Barra lateral (arquivos) ---------- */
-#sidebar{flex:0 0 232px;background:var(--sidebar);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+#sidebar{flex:0 0 248px;min-width:0;max-width:248px;overflow:hidden;background:var(--sidebar);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
 #sidebar.collapsed{display:none}
 .sb-head{display:flex;align-items:center;justify-content:space-between;padding:12px 10px 6px 14px;gap:4px}
 .sb-title{font-size:11px;font-weight:650;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}

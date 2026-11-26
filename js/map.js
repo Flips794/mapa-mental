@@ -838,26 +838,33 @@ $('#exportBtn').addEventListener('click',e=>{
   ]);
 });
 $('#importBtn').addEventListener('click',()=>$('#importFile').click());
-$('#importFile').addEventListener('change',e=>{
-  const file=e.target.files[0]; if(!file) return;
-  const r=new FileReader();
-  r.onload=async ()=>{
-    const raw=String(r.result||'');
-    if(!/\.json$/i.test(file.name) && !/^\s*\{/.test(raw)){ await importTextMap(raw); return; }
+/* aceita vários arquivos de uma vez: cada um vira um mapa novo */
+$('#importFile').addEventListener('change',async e=>{
+  const files=[...e.target.files]; e.target.value='';
+  if(!files.length) return;
+  let ok=0; const bad=[];
+  for(const file of files){
+    const raw=await file.text().catch(()=>'');
     try{
-      const parsed=JSON.parse(raw);
-      if(!parsed || !parsed.root || typeof parsed.root!=='object') throw new Error('formato');
-      const nd=normalizeMap(parsed);
-      await mapFlush();
-      const id=genId();
-      await Store.set('map:'+id, nd);
-      ws.items.push({id,type:'map',title:mapTitle(nd),updated:Date.now()});
-      await wsSave();
-      await mapOpen(id); renderSidebar();
-      toast('Mapa importado como um novo mapa!');
-    }catch(err){ toast('Arquivo inválido.'); }
-  };
-  r.readAsText(file); e.target.value='';
+      if(!/\.json$/i.test(file.name) && !/^\s*\{/.test(raw)){
+        const res=parseOutline(extractOutline(raw));
+        if(!res.ok) throw new Error(res.error);
+        await createMapFromRoot(buildFromParsed(res,null).root);
+      } else {
+        const parsed=JSON.parse(raw);
+        if(!parsed || !parsed.root || typeof parsed.root!=='object') throw new Error('formato');
+        const nd=normalizeMap(parsed);
+        await mapFlush();
+        const id=genId();
+        await Store.set('map:'+id, nd);
+        ws.items.push({id,type:'map',title:mapTitle(nd),updated:Date.now()});
+        await wsSave();
+        await mapOpen(id); renderSidebar();
+      }
+      ok++;
+    }catch(err){ bad.push(file.name); }
+  }
+  toast(ok ? (ok===1 ? 'Mapa importado como um novo mapa!' : ok+' mapas importados!')+(bad.length?' · falharam: '+bad.join(', '):'') : 'Arquivo inválido.');
 });
 
 /* ================= Busca ================= */
