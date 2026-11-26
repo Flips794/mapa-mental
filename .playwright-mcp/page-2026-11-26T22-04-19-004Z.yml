@@ -1,0 +1,92 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]: Mapa Mental
+    - generic "Buscar (Ctrl+F)" [ref=e5]:
+      - textbox [ref=e9]:
+        - /placeholder: Buscar…
+    - button "Desfazer (Ctrl+Z)" [disabled] [ref=e10]
+    - button "Refazer (Ctrl+Shift+Z)" [disabled] [ref=e14]
+    - button "Importar" [ref=e19] [cursor=pointer]
+    - button "Exportar" [ref=e24] [cursor=pointer]
+    - button "Mostrar / esconder painel de edição" [ref=e30] [cursor=pointer]
+    - generic [ref=e33]: Pronto ✓
+  - main [ref=e34]:
+    - generic [ref=e35]:
+      - generic:
+        - generic [ref=e36]:
+          - generic [ref=e37]: Meu Mapa Mental
+          - generic "Tem anotação" [ref=e39]: 📝
+          - button "+" [ref=e40] [cursor=pointer]
+          - button "+" [ref=e41] [cursor=pointer]
+        - generic [ref=e42]:
+          - generic [ref=e43]: Projeto Ômega
+          - button "−"
+          - button "+"
+        - generic [ref=e44]:
+          - generic [ref=e45]: Objetivos
+          - button "+"
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - text: Tarefas
+            - list [ref=e48]:
+              - listitem [ref=e49]: Definir escopo
+              - listitem [ref=e50]: Montar cronograma
+          - button "+"
+        - generic [ref=e51]:
+          - generic [ref=e52]: Ideias
+          - button "−"
+          - button "+"
+        - generic [ref=e53]:
+          - generic [ref=e54]: Texto em negrito e itálico
+          - button "+"
+        - generic [ref=e55]:
+          - generic [ref=e56]: Arraste-me para outro ramo
+          - button "+"
+        - generic [ref=e57]:
+          - generic [ref=e58]: Referências
+          - button "+"
+        - generic [ref=e59]:
+          - generic [ref=e60]: Pessoas
+          - button "+"
+      - generic [ref=e61]:
+        - button "Diminuir zoom (Ctrl −)" [ref=e62] [cursor=pointer]
+        - generic "Voltar para 100%" [ref=e64] [cursor=pointer]: 99%
+        - button "Aumentar zoom (Ctrl +)" [ref=e65] [cursor=pointer]
+        - button "Ajustar à tela (Ctrl+0)" [ref=e69] [cursor=pointer]
+        - button "?" [ref=e72] [cursor=pointer]
+    - complementary [ref=e73]:
+      - generic [ref=e74]:
+        - generic [ref=e75]:
+          - generic [ref=e76]: Tópico central
+          - button "＋ Filho" [ref=e80] [cursor=pointer]
+        - generic [ref=e81]:
+          - button "B" [ref=e82] [cursor=pointer]
+          - button "I" [ref=e84] [cursor=pointer]
+          - button "U" [ref=e86] [cursor=pointer]
+          - button "S" [ref=e88] [cursor=pointer]
+          - button "Lista com marcadores" [ref=e91] [cursor=pointer]
+          - button "Lista numerada" [ref=e97] [cursor=pointer]
+          - button "Inserir link (Ctrl+K)" [ref=e102] [cursor=pointer]
+          - button "Limpar formatação" [ref=e106] [cursor=pointer]
+        - generic [ref=e110]:
+          - heading "Texto do tópico" [level=4] [ref=e111]
+          - generic [ref=e112]: Meu Mapa Mental
+        - generic [ref=e113]:
+          - heading "Anotação fica só aqui no painel" [level=4] [ref=e114]:
+            - text: Anotação
+            - generic [ref=e115]: fica só aqui no painel
+          - generic [ref=e116]:
+            - paragraph [ref=e117]: Bem-vindo! Seu mapa é salvo automaticamente neste navegador.
+            - list [ref=e118]:
+              - listitem [ref=e119]: Selecione um tópico e edite o texto aqui no painel
+              - listitem [ref=e120]: Use negrito, itálico e listas pela barra acima
+              - listitem [ref=e121]: Arraste tópicos para reorganizar e o fundo para mover o mapa
+        - generic [ref=e122]:
+          - heading [level=4] [ref=e123]:
+            - text: Anexos
+            - generic [ref=e124]:
+              - button "🖼 Imagem" [ref=e125] [cursor=pointer]
+              - button "📎 Arquivo" [ref=e126] [cursor=pointer]
+          - generic [ref=e127]: Nenhum anexo.
+        - group [ref=e129]:
+          - generic "Atalhos do teclado" [ref=e130] [cursor=pointer]
