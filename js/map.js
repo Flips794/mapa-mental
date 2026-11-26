@@ -8,7 +8,7 @@ const COLORS = {
   teal:'#14b8a6', pink:'#ec4899', amber:'#eab308', indigo:'#6366f1', sky:'#0ea5e9', slate:'#64748b'
 };
 const BRANCH_ORDER = ['blue','red','green','purple','orange','teal','pink','amber','indigo','sky'];
-const ROOT_INK = '#1e293b';
+const ROOT_INK = 'var(--ink)';
 
 const KEYS = [
   ['Tab','Novo sub-tópico'], ['Enter','Novo tópico irmão'], ['Digitar','Edita o texto no painel'],
@@ -35,9 +35,10 @@ function mapTitle(m){ return plainText((m||M).root.html).trim() || 'Sem título'
 
 function defaultMap(){
   const root=mk('Meu Mapa Mental');
-  root.note='<p><b>Bem-vindo!</b> Seu mapa é salvo automaticamente neste navegador.</p><ul><li>Selecione um tópico e edite o texto aqui no painel</li><li>Use <b>negrito</b>, <i>itálico</i> e listas pela barra acima</li><li>Arraste tópicos para reorganizar e o fundo para mover o mapa</li></ul>';
+  root.note='<p><b>Bem-vindo!</b> Este texto é o próprio mapa: edite aqui e o desenho se atualiza.</p><ul><li>Cada linha com - é um tópico; 2 espaços de recuo = um nível abaixo</li><li>Linhas com &gt; são anotações</li><li>Use o botão IA para criar mapas com Claude ou ChatGPT</li></ul>';
   const a=mk('Projeto Ômega','purple'); a.side='R';
-  a.children=[mk('Objetivos','purple'), mk('Tarefas<ul><li>Definir escopo</li><li>Montar cronograma</li></ul>','purple')];
+  const t=mk('Tarefas','purple'); t.children=[mk('Definir escopo','purple'), mk('Montar cronograma','purple')];
+  a.children=[mk('Objetivos','purple'), t];
   const b=mk('Ideias','green'); b.side='L';
   b.children=[mk('Texto em <b>negrito</b> e <i>itálico</i>','green'), mk('Arraste-me para outro ramo','green')];
   const c=mk('Referências','orange'); c.side='R';
@@ -91,10 +92,10 @@ async function mapOpen(id){
   matches=[]; matchSet=new Set(); $('#search').value=''; $('#searchCnt').textContent='';
   for(const e of els.values()) e.remove(); els.clear(); fastIndex=null;
   selectedId=M.root.id;
-  if(appMode==='map'){ render(); fit(false); } else mapNeedsFit=true;
+  if(appMode==='map'){ render(); fit(false); outlineRefresh(true); } else mapNeedsFit=true;
 }
 async function mapFlush(){ if(M && saveTimer){ clearTimeout(saveTimer); saveTimer=null; await saveNow(); } }
-function mapShown(){ render(); if(mapNeedsFit){ fit(false); mapNeedsFit=false; } }
+function mapShown(){ render(); if(mapNeedsFit){ fit(false); mapNeedsFit=false; } outlineRefresh(true); }
 
 /* ================= Árvore ================= */
 function findNode(id, node, parent, level){
@@ -187,7 +188,7 @@ function updateEl(e,n,level,dir){
       const f = n.collapsed ? hBtn('fold count', hidden, 'Expandir') : hBtn('fold','−','Recolher');
       side(f,dir,off); off += n.collapsed ? 12+hidden.length*6+6 : 24;
     }
-    if(!n.collapsed) side(hBtn('add','+','Novo sub-tópico (Tab)'),dir,off);
+    if(!n.children.length) side(hBtn('add','+','Novo sub-tópico (Tab)'),dir,off);
   }
 }
 function hBtn(cls,txt,title){ const b=document.createElement('button'); b.className='h '+cls; b.textContent=txt; b.title=title; b.tabIndex=-1; return b; }
@@ -448,6 +449,7 @@ function selectNode(id){
   selectedId=id;
   for(const [k,e] of els) e.classList.toggle('sel',k===id);
   updatePanel();
+  outlineOnSelect(id);
 }
 
 /* ================= Edição direto no mapa ================= */
@@ -605,7 +607,10 @@ document.addEventListener('keydown',e=>{
     case 'Escape': selectNode(null); break;
     case 'ArrowLeft': case 'ArrowRight': case 'ArrowUp': case 'ArrowDown': e.preventDefault(); navigate(e.key); break;
     default:
-      if(e.key.length===1){ showPanel(true); rteText.focus({preventScroll:true}); placeCaretEnd(rteText); }
+      if(e.key.length===1){
+        if(panelTab==='text') focusTextAtNode(selectedId);
+        else { showPanel(true); rteText.focus({preventScroll:true}); placeCaretEnd(rteText); }
+      }
   }
 });
 
@@ -806,7 +811,7 @@ function persistable(){
   const files={}; used.forEach(k=>{ if(M.files[k]) files[k]=M.files[k]; });
   return {version:2, root:M.root, files};
 }
-function saveSoon(){ fastIndex=null; setStatus('Salvando…'); clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,400); }
+function saveSoon(){ fastIndex=null; outlineRefreshSoon(); setStatus('Salvando…'); clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,400); }
 async function saveNow(){
   saveTimer=null;
   if(!M || !curMapId) return;
@@ -818,20 +823,29 @@ async function saveNow(){
 window.addEventListener('pagehide',()=>{ if(M && curMapId) Store.set('map:'+curMapId, persistable()); });
 
 /* ================= Exportar / importar (mapa atual) ================= */
-$('#exportBtn').addEventListener('click',()=>{
+function exportJson(){
   const blob=new Blob([JSON.stringify(persistable(),null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download=(mapTitle().replace(/[\\/:*?"<>|]+/g,'').slice(0,60)||'mapa-mental')+'-'+new Date().toISOString().slice(0,10)+'.json';
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-  toast('Backup exportado!');
+  toast('Backup completo exportado (.json).');
+}
+$('#exportBtn').addEventListener('click',e=>{
+  const r=e.currentTarget.getBoundingClientRect();
+  showMenu(r.left, r.bottom+4, [
+    {label:'📝  Texto (.md) — para ler e usar com IA', fn:exportMd},
+    {label:'🗄  Backup completo (.json) — inclui anexos', fn:exportJson},
+  ]);
 });
 $('#importBtn').addEventListener('click',()=>$('#importFile').click());
 $('#importFile').addEventListener('change',e=>{
   const file=e.target.files[0]; if(!file) return;
   const r=new FileReader();
   r.onload=async ()=>{
+    const raw=String(r.result||'');
+    if(!/\.json$/i.test(file.name) && !/^\s*\{/.test(raw)){ await importTextMap(raw); return; }
     try{
-      const parsed=JSON.parse(r.result);
+      const parsed=JSON.parse(raw);
       if(!parsed || !parsed.root || typeof parsed.root!=='object') throw new Error('formato');
       const nd=normalizeMap(parsed);
       await mapFlush();

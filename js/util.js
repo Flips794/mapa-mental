@@ -4,6 +4,8 @@
 "use strict";
 
 const $ = s => document.querySelector(s);
+let ws=null;        // área de trabalho: {version, mode, items:[{id,type,title,...}], current:{map,doc}}
+let appMode='map';  // 'map' | 'doc'
 function genId(){ return 'n'+Math.random().toString(36).slice(2,8)+Date.now().toString(36).slice(-4); }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -163,3 +165,20 @@ function showMenu(x,y,items){
 }
 document.addEventListener('pointerdown',e=>{ if(openMenuEl && !openMenuEl.contains(e.target) && !e.target.closest('.more')) closeMenu(); },true);
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeMenu(); });
+
+/* ---------- Tema claro / escuro ---------- */
+function currentTheme(){ return document.documentElement.dataset.theme==='dark'?'dark':'light'; }
+function applyTheme(t){
+  document.documentElement.dataset.theme=t;
+  const b=document.getElementById('themeBtn');
+  if(b){ b.title = t==='dark' ? 'Usar tema claro' : 'Usar tema escuro'; b.innerHTML = t==='dark'
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/></svg>'; }
+}
+document.getElementById('themeBtn').addEventListener('click',()=>{
+  const t=currentTheme()==='dark'?'light':'dark';
+  try{ localStorage.setItem('mm-theme',t); }catch(e){}
+  applyTheme(t);
+});
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change',e=>{ let s=null; try{ s=localStorage.getItem('mm-theme'); }catch(err){} if(!s) applyTheme(e.matches?'dark':'light'); });
+applyTheme(currentTheme());

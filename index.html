@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mapa Mental</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 16L6 8M16 16L26 9M16 16L25 25' stroke='%2394a3b8' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%236366f1'/%3E%3Ccircle cx='6' cy='8' r='3.5' fill='%23ec4899'/%3E%3Ccircle cx='26' cy='9' r='3.5' fill='%2322c55e'/%3E%3Ccircle cx='25' cy='25' r='3.5' fill='%23f97316'/%3E%3C/svg%3E">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem('mm-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');}catch(e){}</script>
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -37,11 +38,11 @@
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14l5-5-5-5"/><path d="M20 9H9a5 5 0 000 10h3"/></svg>
   </button>
   <span class="sep map-only"></span>
-  <button class="ib map-only" id="importBtn" title="Importar backup .json (vira um novo mapa)">
+  <button class="ib map-only" id="importBtn" title="Importar mapa em texto (.md / .txt) ou backup (.json) — vira um novo mapa">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 002 2h12a2 2 0 002-2v-4"/></svg>
     <span class="hide-sm">Importar</span>
   </button>
-  <button class="ib map-only" id="exportBtn" title="Exportar backup .json deste mapa">
+  <button class="ib map-only" id="exportBtn" title="Exportar este mapa em texto (.md) ou backup completo (.json)">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 15v4a2 2 0 002 2h12a2 2 0 002-2v-4"/></svg>
     <span class="hide-sm">Exportar</span>
   </button>
@@ -49,8 +50,9 @@
   <button class="ib on map-only" id="panelBtn" title="Mostrar / esconder painel de edição">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg>
   </button>
+  <button class="ib" id="themeBtn" title="Tema escuro"></button>
   <div class="status hide-sm" id="status">—</div>
-  <input type="file" id="importFile" accept="application/json,.json" class="hidden">
+  <input type="file" id="importFile" accept=".md,.txt,.markdown,.json,text/markdown,text/plain,application/json" class="hidden">
   <input type="file" id="pdfFile" accept="application/pdf,.pdf" class="hidden">
 </header>
 
@@ -89,6 +91,39 @@
     </div>
 
     <aside id="panel">
+      <div class="p-resize" id="pResize" title="Arraste para mudar a largura"></div>
+      <div class="p-tabs">
+        <button data-tab="text" class="on" title="O mapa inteiro em texto simples">📝 Texto</button>
+        <button data-tab="topic" title="Formatação, anexos e links do tópico selecionado">✎ Tópico</button>
+      </div>
+
+      <div class="p-text" id="pText">
+        <div class="pt-bar">
+          <button class="ib ai" id="aiBtn" title="Criar ou editar o mapa com Claude ou ChatGPT">🤖 IA</button>
+          <button class="ib" id="copyTextBtn" title="Copiar o texto do mapa">Copiar</button>
+          <button class="ib" id="fmtHelpBtn" title="Como escrever no formato do mapa">? Formato</button>
+          <span class="spacer"></span>
+          <span class="pt-status" id="ptStatus">✓ sincronizado</span>
+        </div>
+        <div class="pt-help hidden" id="ptHelp">
+          O texto abaixo <b>é</b> o mapa: edite aqui e o desenho se atualiza sozinho.
+<pre># Tópico central
+> anotação do tópico
+- Tópico principal {verde, direita}
+  - Sub-tópico
+    > anotação do sub-tópico
+  - Sub-tópico com link [[Documento#3]]</pre>
+          <code>-</code> = tópico · 2 espaços = um nível abaixo (<code>Tab</code> / <code>Shift+Tab</code>) · <code>&gt;</code> = anotação ·
+          <code>{cor, esquerda|direita, recolhido}</code> no fim da linha (opcional) · <code>**negrito**</code> <code>*itálico*</code> <code>~~tachado~~</code> <code>[texto](https://…)</code>
+        </div>
+        <div class="pt-wrap">
+          <div class="pt-hl" id="ptHl"></div>
+          <textarea id="mapText" spellcheck="false" autocomplete="off" aria-label="Texto do mapa"></textarea>
+          <div class="pt-mirror" id="ptMirror" aria-hidden="true"></div>
+        </div>
+      </div>
+
+      <div id="pTopic" class="hidden">
       <div class="p-empty" id="pEmpty">
         <h3>Nenhum tópico selecionado</h3>
         <p>Clique em um tópico do mapa para editar o texto dele aqui, com negrito, itálico, listas e links.</p>
@@ -165,6 +200,7 @@
           <summary>Atalhos do teclado</summary>
           <div class="keys" id="keysPanel"></div>
         </details>
+      </div>
       </div>
     </aside>
   </div>
@@ -244,12 +280,39 @@
   </div>
 </main>
 
+<div class="modal hidden" id="aiModal" role="dialog" aria-label="Criar ou editar com IA">
+  <div class="modal-box">
+    <div class="modal-head"><b>🤖 Criar ou editar com Claude / ChatGPT</b><button class="ib" id="aiClose" title="Fechar">✕</button></div>
+    <div class="modal-sub">Sem chave e sem custo: você copia um prompt pronto, cola no chat da IA e depois cola a resposta aqui.</div>
+    <div class="ai-step"><div class="ai-n">1</div><div>
+      <label for="aiAsk">O que você quer que a IA faça?</label>
+      <textarea id="aiAsk" rows="3" placeholder="Ex.: Crie um mapa mental sobre marketing digital · Expanda o ramo “Ideias” com 5 sugestões · Resuma cada tópico em até 5 palavras"></textarea>
+      <label class="chk"><input type="checkbox" id="aiInclude" checked> Enviar o mapa atual junto (para a IA editar em cima dele)</label>
+      <div class="row">
+        <button class="btn-s primary" id="aiCopy">📋 Copiar prompt</button>
+        <a class="btn-s" href="https://claude.ai/new" target="_blank" rel="noopener noreferrer">Abrir Claude ↗</a>
+        <a class="btn-s" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">Abrir ChatGPT ↗</a>
+      </div>
+    </div></div>
+    <div class="ai-step"><div class="ai-n">2</div><div>
+      <label for="aiPaste">Cole aqui a resposta da IA</label>
+      <textarea id="aiPaste" class="mono" rows="8" placeholder="Pode colar a resposta inteira; o bloco do mapa é encontrado automaticamente."></textarea>
+      <div class="ai-preview" id="aiPreview"></div>
+      <div class="row">
+        <button class="btn-s" id="aiNew" disabled>Criar como novo mapa</button>
+        <button class="btn-s primary" id="aiApply" disabled>Aplicar neste mapa</button>
+      </div>
+    </div></div>
+  </div>
+</div>
+
 <div id="lightbox"><img alt=""></div>
 <div id="toast"></div>
 
 <script src="js/util.js"></script>
 <script src="js/map.js"></script>
 <script src="js/docs.js"></script>
+<script src="js/outline.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -3,8 +3,7 @@
    ========================================================= */
 "use strict";
 
-let ws=null;                 // {version, mode, items:[{id,type,title,updated,...}], current:{map,doc}}
-let appMode='map';
+// ws e appMode são declarados em util.js (precisam existir antes dos outros scripts)
 
 async function wsSave(){ if(ws) await Store.set('ws',ws); }
 function wsItem(id){ return ws.items.find(i=>i.id===id); }
@@ -80,7 +79,8 @@ async function newMap(){
   ws.items.push({id,type:'map',title:'Novo mapa',updated:Date.now()});
   await wsSave();
   await mapOpen(id); renderSidebar();
-  showPanel(true); rteText.focus(); selectAllIn(rteText);
+  showPanel(true);
+  if(panelTab==='text') selectNodeTitleInText(M.root.id); else { rteText.focus(); selectAllIn(rteText); }
   toast('Digite o nome do novo mapa');
 }
 

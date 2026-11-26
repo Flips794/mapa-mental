@@ -6,6 +6,39 @@ Mapas mentais e documentos **100% no navegador**. Sem login, sem servidor, sem m
 
 ## ✨ Funcionalidades
 
+### 📝 O mapa é um texto simples
+O conteúdo de cada mapa é um texto leve (estilo Markdown), visível na aba **📝 Texto** do painel direito. O desenho do mapa é só a apresentação desse texto: edite o texto e o mapa se atualiza; mexa no mapa e o texto acompanha. Clicar em um tópico destaca a linha dele no texto, e colocar o cursor numa linha seleciona o tópico.
+
+```markdown
+# Tópico central
+> anotação do tópico central
+- Tópico principal {verde, direita}
+  - Sub-tópico
+    > anotação do sub-tópico
+  - Sub-tópico com link para documento [[Contrato#3]]
+- Outro tópico principal {azul, esquerda}
+  - Ramo fechado {recolhido}
+```
+
+| Escrita | Significado |
+|---|---|
+| `# texto` | tópico central (uma vez) |
+| `- texto` | tópico; **2 espaços** de recuo = um nível abaixo (`Tab` / `Shift+Tab`) |
+| `> texto` | anotação do tópico logo acima |
+| `{cor, lado, recolhido}` | opcional: azul, vermelho, verde, roxo, laranja, turquesa, rosa, amarelo, anil, celeste, cinza · esquerda/direita · recolhido |
+| `[[Documento#N]]` | link para a página N de um documento |
+| `**negrito**` `*itálico*` `~~tachado~~` `[texto](https://…)` | formatação |
+
+Também são aceitos títulos `##`, listas numeradas e recuo com tab — o que facilita colar textos vindos de outras ferramentas.
+
+### 🤖 Com Claude ou ChatGPT
+Botão **🤖 IA** (aba Texto): escreva o que quer ("crie um mapa sobre…", "expanda o ramo X"), clique em **Copiar prompt** e cole no Claude ou no ChatGPT. Depois cole a resposta na mesma janela e escolha **Aplicar neste mapa** ou **Criar como novo mapa**. Sem chave de API e sem custo; o bloco do mapa é encontrado automaticamente na resposta. `Ctrl+Z` desfaz.
+
+Exportar → **Texto (.md)** gera um arquivo que qualquer IA ou editor lê; Importar aceita `.md`, `.txt` e `.json`.
+
+### 🌙 Tema claro e escuro
+Botão de lua/sol no topo. Na primeira visita segue o tema do sistema.
+
 ### 🧠 Mapas mentais
 - Vários mapas, listados na barra lateral esquerda (criar, renomear, duplicar, excluir)
 - Tópico central com ramos dos dois lados, cada ramo com sua cor
@@ -13,7 +46,7 @@ Mapas mentais e documentos **100% no navegador**. Sem login, sem servidor, sem m
 - Arraste e solte tópicos para reorganizar; desfazer / refazer
 - Painel de edição à direita com **negrito**, *itálico*, sublinhado, tachado, listas e links
 - **Link para página de documento**: no painel, use *📄 Vincular*, escolha o documento e a página. No mapa aparece um selo curto (`📄 p.3`); um clique abre o documento direto nessa página
-- Anotações, imagens e arquivos anexos; busca; exportar / importar `.json`
+- Anotações, imagens e arquivos anexos; busca; backup completo em `.json` (inclui anexos)
 
 ### 📄 Documentos
 - Documentos em páginas A4, com escrita como no Word: títulos, tamanho e cor da fonte, marca-texto, alinhamento, listas e links
@@ -45,6 +78,7 @@ css/app.css         estilos
 js/util.js          armazenamento, HTML seguro, utilidades
 js/map.js           editor de mapa mental
 js/docs.js          editor de documentos / PDF
+js/outline.js       formato de texto do mapa, painel Texto e IA
 js/app.js           barra lateral, modos e inicialização
 vendor/pdfjs/       PDF.js 3.11.174 (Mozilla, Apache 2.0) para ler PDFs
 ```
