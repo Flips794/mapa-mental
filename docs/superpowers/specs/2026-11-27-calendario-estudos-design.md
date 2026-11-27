@@ -29,13 +29,14 @@ se está completo; faz **questões**; e marca o que estudou no dia. Ele quer evo
 6. Resumo sem consulta escrito no app e conferido com os sub-tópicos do mapa (checklist), que calcula a
    completude sozinho.
 7. Funcionar com tópicos dos mapas **e** com itens livres (aula, PDF, lei seca, simulado).
+8. **Tempo de estudo opcional**: quem quiser registra quanto tempo estudou; quem não quiser ignora, sem
+   deixar o registro mais lento.
 
 ## 3. Não-objetivos (agora — podem vir depois)
 
 - Notificações/lembretes fora do app (push, e-mail, Google Agenda).
 - Planejamento de estudo futuro (cronograma de conteúdo novo); o calendário só agenda **revisões**.
 - Sistema próprio de flashcards (flashcard é só um rótulo de método).
-- Cronômetro / horas estudadas (ver pergunta aberta no fim).
 - Gráficos elaborados de desempenho; no começo, totais simples por dia e por matéria.
 - Mostrar status de revisão dentro do desenho do mapa (evolução natural, fica para depois).
 
@@ -88,7 +89,10 @@ Terceiro botão no topo: **Mapas | Documentos | Estudos**. Ao entrar em Estudos,
      Para item livre ou tópico sem sub-tópicos: nota manual **completo / faltou pouco / faltou muito**.
    - **Questões**: quantas fez e quantas acertou → percentual.
    - **Flashcards / Releitura / Outro**: autoavaliação de um clique **difícil / ok / fácil**.
-3. **Salvar** → mostra a próxima revisão ("Próxima revisão: 3 dez, em 4 dias").
+3. **Tempo (opcional)** — campo vazio por padrão, que nunca é obrigatório: digitar a duração ("1h30",
+   "45min", "45") **ou** usar o **cronômetro** (iniciar/pausar/parar) que preenche o campo. O cronômetro
+   continua contando se ele trocar de área ou recarregar a página (guardar a hora de início).
+4. **Salvar** → mostra a próxima revisão ("Próxima revisão: 3 dez, em 4 dias").
 
 O primeiro registro de um assunto é o **estudo**; os seguintes são **revisões** (mesmo formulário,
 aberto já com o assunto quando vem da lista "Hoje").
@@ -127,16 +131,17 @@ Hoje (3)
   Matemática › 44. Fundamentos de probabilidade     2ª revisão        [Revisar]
   Lei seca: CPP arts. 158-A a 158-F (item livre)    1ª revisão        [Revisar]
   Informática › 36 — IPv4, CIDR                      4ª revisão        [Revisar]
-Estudado hoje: 2 assuntos · 45 questões · 78% de acertos
+Estudado hoje: 2 assuntos · 45 questões · 78% de acertos · 2h10 (quando houver tempo registrado)
 Próximos 7 dias: 9 revisões
 ```
 
 **Calendário** (mês): cada dia mostra marcas de **estudado/revisado** (feito) e **revisões previstas**,
-e o total de questões do dia; dias com atrasadas destacados. Clicar num dia abre a lista daquele dia
+e o total de questões do dia (e o tempo, se registrado); dias com atrasadas destacados. Clicar num dia abre a lista daquele dia
 (sessões feitas com métodos, questões e desempenho; revisões previstas).
 
 **Desempenho** (começo simples): questões e acertos por dia (últimos 30 dias, em barras) e por matéria
-(mapa), e a lista de assuntos com pior desempenho recente.
+(mapa), tempo estudado por dia e por matéria (só aparece se houver tempo registrado), e a lista de
+assuntos com pior desempenho recente.
 
 **Formulário de registro**: painel lateral ou janela, seguindo 7.2; tem que caber em uma tela.
 
@@ -147,7 +152,8 @@ e o total de questões do dia; dias com atrasadas destacados. Clicar num dia abr
   feitas), datas de criação.
 - `estudos/sessoes/AAAA-MM.json` — sessões do mês: `id`, `itemId`, `data` (AAAA-MM-DD, fuso local),
   `tipo` (`estudo`|`revisao`), `metodos` [{`tipo`, `feitas`, `acertos`, `resumo` (texto),
-  `checklist` [nodeIds marcados], `total`, `nota`}], `desempenho`, intervalo calculado.
+  `checklist` [nodeIds marcados], `total`, `nota`}], `desempenho`, intervalo calculado, `minutos`
+  (opcional, vazio quando não registrado).
 - `estudos/ajustes.json` — limiares e multiplicadores.
 - Separar sessões por mês evita reescrever um arquivo gigante a cada salvamento (cada gravação no GitHub
   é um commit).
