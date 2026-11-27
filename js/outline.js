@@ -53,11 +53,17 @@ function htmlToInline(html){
 function mdInline(t){
   let h=esc(t||'');
   h=h.replace(/&lt;br\s*\/?&gt;/gi,'<br>').replace(/&lt;(\/?)u&gt;/gi,'<$1u>');
-  h=h.replace(/`([^`]+)`/g,'<code>$1</code>');
-  h=h.replace(/\[([^\]]+)\]\(((?:https?:|mailto:)[^)\s]+)\)/g,'<a href="$2">$1</a>');
-  h=h.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/__(.+?)__/g,'<b>$1</b>');
+  // código e endereços de links ficam guardados à parte, para negrito/itálico não mexerem neles
+  const keep=[], hold=s=>'\u0000'+(keep.push(s)-1)+'\u0000';
+  h=h.replace(/\u0000/g,'');
+  h=h.replace(/`([^`]+)`/g,(_,c)=>hold('<code>'+c+'</code>'));
+  h=h.replace(/\[([^\]]+)\]\(((?:https?:|mailto:)[^)\s]+)\)/g,(_,txt,url)=>hold('<a href="'+url+'">')+txt+hold('</a>'));
+  h=h.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+  // __negrito__ só fora de palavras (ED_1_2018___ABT não vira negrito)
+  h=h.replace(/(^|[^\p{L}\p{N}_])__(?=\S)(.+?)(?<=\S)__(?![\p{L}\p{N}_])/gu,'$1<b>$2</b>');
   h=h.replace(/\*([^*\s][^*]*?)\*/g,'<i>$1</i>');
   h=h.replace(/~~(.+?)~~/g,'<s>$1</s>');
+  h=h.replace(/\u0000(\d+)\u0000/g,(_,i)=>keep[i]);
   return sanitize(h);
 }
 function noteToLines(html){
@@ -486,10 +492,11 @@ $('#aiNew').addEventListener('click',async ()=>{
   closeAi(); toast('Novo mapa criado.');
 });
 /* aceita um tópico central (1 árvore) ou a lista de árvores */
-async function createMapFromRoot(rootOrTrees){
+async function createMapFromRoot(rootOrTrees, title){
   await mapFlush();
   const trees = Array.isArray(rootOrTrees) ? rootOrTrees : [{root:rootOrTrees, x:0, y:0}];
   const id=genId(), data={version:3, trees, files:{}};
+  data.title = (title && String(title).trim()) || mapTitle(data);
   await Store.set('map:'+id,data);
   ws.items.push({id,type:'map',title:mapTitle(data),updated:Date.now()});
   await wsSave();

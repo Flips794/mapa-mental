@@ -31,7 +31,13 @@ let mapNeedsFit=false;
 const canvas=$('#canvas'), world=$('#world'), svg=$('#links');
 
 function mk(html,color){ return {id:genId(),html:html||'',note:'',color:color||'slate',collapsed:false,attachments:[],links:[],children:[]}; }
-function mapTitle(m){ const mm=m||M; const r=mm.trees ? mm.trees[0].root : mm.root; return plainText(r.html).trim() || 'Sem título'; }
+/* nome do mapa: independente do texto das árvores (mapas antigos herdam o texto da 1ª árvore uma vez) */
+function mapTitle(m){
+  const mm=m||M;
+  if(typeof mm.title==='string' && mm.title.trim()) return mm.title.trim();
+  const r=mm.trees ? mm.trees[0].root : mm.root;
+  return plainText(r.html).trim() || 'Sem título';
+}
 /* várias árvores no mesmo mapa: M.root continua apontando para a primeira */
 function withRootAlias(m){
   Object.defineProperty(m,'root',{get(){ return this.trees[0].root; }, set(v){ this.trees[0].root=v; }, enumerable:false, configurable:true});
@@ -53,9 +59,9 @@ function defaultMap(){
   const c=mk('Referências','orange'); c.side='R';
   const d=mk('Pessoas','blue'); d.side='L';
   root.children=[a,b,c,d];
-  return withRootAlias({version:3, trees:[{root,x:0,y:0}], files:{}});
+  return withRootAlias({version:3, title:'Meu Mapa Mental', trees:[{root,x:0,y:0}], files:{}});
 }
-function blankMap(title){ const r=mk(esc(title||'Novo mapa')); return withRootAlias({version:3, trees:[{root:r,x:0,y:0}], files:{}}); }
+function blankMap(title){ const t=title||'Novo mapa'; const r=mk(esc(t)); return withRootAlias({version:3, title:t, trees:[{root:r,x:0,y:0}], files:{}}); }
 
 /* Converte qualquer versão (inclusive a antiga, só texto) para o formato atual */
 function normalizeMap(d){
@@ -94,14 +100,18 @@ function normalizeMap(d){
     const num=v=>typeof v==='number' && isFinite(v) ? v : null;
     return {root:t.root, x: i===0 ? (num(t.x)??0) : num(t.x), y: i===0 ? (num(t.y)??0) : num(t.y)};
   });
-  return withRootAlias({version:3, trees, files});
+  const title = typeof d.title==='string' && d.title.trim() ? d.title.trim().slice(0,200) : (plainText(trees[0].root.html).trim() || 'Sem título');
+  return withRootAlias({version:3, title, trees, files});
 }
 
 /* ================= Abrir / trocar de mapa ================= */
 async function mapOpen(id){
   await mapFlush();
   let data=await Store.get('map:'+id);
+  const hadTitle = data && typeof data.title==='string' && data.title.trim();
   data = data && (data.root || data.trees) ? normalizeMap(data) : defaultMap();
+  // mapa antigo sem nome próprio: vale o nome que já aparece na lista
+  if(!hadTitle){ const it=ws.items.find(i=>i.id===id); if(it && it.title) data.title=it.title; }
   M=data; curMapId=id; ws.current.map=id;
   past.length=0; future.length=0; editingId=null; editSession=null;
   matches=[]; matchSet=new Set(); $('#search').value=''; $('#searchCnt').textContent='';
@@ -937,7 +947,7 @@ let saveTimer=null;
 function persistable(){
   const used=new Set(); const w=n=>{ n.attachments.forEach(a=>used.add(a)); n.children.forEach(w); }; allRoots().forEach(w);
   const files={}; used.forEach(k=>{ if(M.files[k]) files[k]=M.files[k]; });
-  return {version:3, trees:M.trees, files};
+  return {version:3, title:mapTitle(), trees:M.trees, files};
 }
 function saveSoon(){ fastIndex=null; outlineRefreshSoon(); setStatus('Salvando…'); clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,400); }
 async function saveNow(){
@@ -987,7 +997,7 @@ $('#importFile').addEventListener('change',async e=>{
       if(!/\.json$/i.test(file.name) && !/^\s*\{/.test(raw)){
         const res=parseOutline(extractOutline(raw));
         if(!res.ok) throw new Error(res.error);
-        await createMapFromRoot(buildFromParsed(res,null).trees);
+        await createMapFromRoot(buildFromParsed(res,null).trees, file.name.replace(/\.(md|markdown|txt)$/i,'').trim());
       } else {
         const parsed=JSON.parse(raw);
         if(parsed && parsed.format==='mapa-mental-backup'){ await importBackup(parsed); backups++; continue; }

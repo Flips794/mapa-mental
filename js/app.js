@@ -73,15 +73,17 @@ $('#sbPdf').addEventListener('click',()=>pickPdf('new'));
 $('#sbBtn').addEventListener('click',()=>{ $('#sidebar').classList.toggle('collapsed'); $('#sbBtn').classList.toggle('on',!$('#sidebar').classList.contains('collapsed')); if(appMode==='map') scheduleLayout(); });
 
 async function newMap(){
+  const name=prompt('Nome do novo mapa:','Novo mapa'); if(name===null) return;
+  const title=name.trim()||'Novo mapa';
   await mapFlush();
-  const id=genId(), data=blankMap('Novo mapa');
+  const id=genId(), data=blankMap(title);
   await Store.set('map:'+id,data);
-  ws.items.push({id,type:'map',title:'Novo mapa',updated:Date.now()});
+  ws.items.push({id,type:'map',title,updated:Date.now()});
   await wsSave();
   await mapOpen(id); renderSidebar();
   showPanel(true);
   if(panelTab==='text') selectNodeTitleInText(M.root.id); else { rteText.focus(); selectAllIn(rteText); }
-  toast('Digite o nome do novo mapa');
+  toast('Mapa criado · o tópico central pode ter outro nome, é só editar');
 }
 
 async function renameItem(it){
@@ -89,8 +91,10 @@ async function renameItem(it){
   const name=prompt('Novo nome:', it.title||''); if(name==null) return;
   const t=name.trim(); if(!t) return;
   if(it.type==='map'){
-    if(it.id===curMapId){ pushHistory(); M.root.html=esc(t); fastIndex=null; render(); await saveNow(); }
-    else { const d=await Store.get('map:'+it.id); if(d&&(d.root||d.trees)){ const n=normalizeMap(d); n.root.html=esc(t); await Store.set('map:'+it.id,{version:3,trees:n.trees,files:n.files}); } it.title=t; await wsSave(); }
+    // só o nome do mapa muda; o texto das árvores fica como está
+    if(it.id===curMapId){ M.title=t; await saveNow(); }
+    else { const d=await Store.get('map:'+it.id); if(d&&(d.root||d.trees)){ const n=normalizeMap(d); await Store.set('map:'+it.id,{version:3,title:t,trees:n.trees,files:n.files}); } it.title=t; await wsSave(); }
+    if(Store.mode==='server'){ const d=it.id===curMapId?M:normalizeMap(await Store.get('map:'+it.id)); Store.setText(it.id,t,mapToText(d).text); }
   } else {
     if(it.id===curDocId){ docTitleEl.value=t; await docSaveNow(); }
     else { const d=await Store.get('doc:'+it.id); if(d){ d.title=t; await Store.set('doc:'+it.id,d); } it.title=t; await wsSave(); }
@@ -103,8 +107,7 @@ async function duplicateItem(it){
   const key=it.type+':'+it.id, data=await Store.get(key); if(!data) return;
   const copy=JSON.parse(JSON.stringify(data)), id=genId();
   const title=(it.title||'Sem título')+' (cópia)';
-  if(it.type==='map'){ if(Array.isArray(copy.trees) && copy.trees[0]) copy.trees[0].root.html=esc(title); else if(copy.root) copy.root.html=esc(title); }
-  else copy.title=title;
+  copy.title=title;
   await Store.set(it.type+':'+id, copy);
   const meta=Object.assign({},it,{id,title,updated:Date.now()});
   ws.items.splice(ws.items.indexOf(it)+1,0,meta);

@@ -64,7 +64,7 @@ Exportar → **Texto (.md)** gera um arquivo que qualquer IA ou editor lê; Impo
 Botão de lua/sol no topo. Na primeira visita segue o tema do sistema.
 
 ### 🧠 Mapas mentais
-- Vários mapas, listados na barra lateral esquerda (criar, renomear, duplicar, excluir)
+- Vários mapas, listados na barra lateral esquerda (criar, renomear, duplicar, excluir). O **nome do mapa** é independente do texto dos tópicos centrais das árvores
 - **Várias árvores no mesmo mapa** (como no Whimsical): botão **＋ Árvore** na barra de zoom; arraste o tópico central para mover a árvore inteira; arraste um tópico para outra árvore, ou solte-o no vazio para virar uma árvore nova
 - Tópico central com ramos dos dois lados, cada ramo com sua cor
 - Canvas livre: arraste o fundo (ou use a roda do mouse) para mover; `Ctrl + roda` para zoom
