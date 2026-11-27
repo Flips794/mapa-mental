@@ -133,8 +133,86 @@ function mesclarColecoes(a, b){
   return { versao: Math.max(a.versao || 1, b.versao || 1), registros };
 }
 
+/* ---------- Evidências, domínio e retenção ---------- */
+function ordenarSessoes(sessoes){
+  return (sessoes || []).filter(s => s && !s.excluida).slice().sort((a, b) =>
+    a.data < b.data ? -1 : a.data > b.data ? 1 : (a.criadoEm || '') < (b.criadoEm || '') ? -1 : (a.criadoEm || '') > (b.criadoEm || '') ? 1 : (a.id < b.id ? -1 : 1));
+}
+function valorExplicacao(e, aj){
+  if (!e) return null;
+  if (Array.isArray(e.marcados) && e.total > 0) return Math.min(1, e.marcados.length / e.total);
+  if (e.nota && aj.notaExplicacao[e.nota] != null) return aj.notaExplicacao[e.nota];
+  return null;
+}
+/* Resultado de recuperação de uma sessão (0–1), ou null sem evidência (spec 7.1) */
+function resultadoSessao(s, aj){
+  aj = aj || AJUSTES_PADRAO;
+  let soma = 0, pesos = 0;
+  if (s.questoes && s.questoes.feitas > 0){
+    const w = aj.pesoQuestoes * Math.min(1, s.questoes.feitas / aj.refQuestoes);
+    soma += w * (Math.min(s.questoes.acertos, s.questoes.feitas) / s.questoes.feitas); pesos += w;
+  }
+  const r = valorExplicacao(s.explicacao, aj);
+  if (r != null){ soma += aj.pesoExplicacao * r; pesos += aj.pesoExplicacao; }
+  if (s.percebida && aj.percebidaValor[s.percebida] != null){ soma += aj.pesoPercebida * aj.percebidaValor[s.percebida]; pesos += aj.pesoPercebida; }
+  return pesos > 0 ? soma / pesos : null;
+}
+function categoria(valor, aj){
+  const c = (aj || AJUSTES_PADRAO).categorias;
+  return valor >= c.excelente ? 'excelente' : valor >= c.bom ? 'bom' : valor >= c.regular ? 'regular' : 'critico';
+}
+const pesoRecencia = (data, ref, aj) => Math.pow(0.5, Math.max(0, diffDias(data, ref)) / aj.meiaVidaDias);
+/* Domínio (compreensão), olhando todo o histórico até refData (spec 7.2) */
+function dominio(sessoes, aj, refData){
+  aj = aj || AJUSTES_PADRAO;
+  const lista = ordenarSessoes(sessoes).filter(s => !refData || s.data <= refData);
+  const ref = refData || (lista.length ? lista[lista.length - 1].data : hoje());
+  let qa = 0, qn = 0, questoes = 0, er = 0, ew = 0, avaliadas = 0, ultimaPercebida = null;
+  for (const s of lista){
+    const w = pesoRecencia(s.data, ref, aj);
+    if (s.questoes && s.questoes.feitas > 0){ qa += w * Math.min(s.questoes.acertos, s.questoes.feitas); qn += w * s.questoes.feitas; questoes += s.questoes.feitas; }
+    const r = valorExplicacao(s.explicacao, aj);
+    if (r != null){ er += w * r; ew += w; }
+    if (s.percebida) ultimaPercebida = s.percebida;
+    if (resultadoSessao(s, aj) != null) avaliadas++;
+  }
+  const Q = qn > 0 ? qa / qn : null, R = ew > 0 ? er / ew : null;
+  let base = Q != null && R != null ? aj.pesoDominioQuestoes * Q + aj.pesoDominioExplicacao * R : Q != null ? Q : R;
+  let valor = null;
+  if (base != null){
+    valor = Math.round(base * 100) + (ultimaPercebida && aj.ajustePercebida[ultimaPercebida] || 0);
+    valor = Math.max(0, Math.min(100, valor));
+  }
+  const suficiente = valor != null && questoes >= aj.minQuestoes && avaliadas >= aj.minAvaliadas;
+  return { valor, categoria: suficiente ? categoria(valor, aj) : null, suficiente, questoes, avaliadas };
+}
+/* Retenção (lembrar após um intervalo): só revisões com evidência (spec 7.3) */
+function retencao(sessoes, aj, refData){
+  aj = aj || AJUSTES_PADRAO;
+  const lista = ordenarSessoes(sessoes).filter(s => !refData || s.data <= refData);
+  const ref = refData || (lista.length ? lista[lista.length - 1].data : hoje());
+  const revs = [];
+  let anterior = null, maiorIntervaloBom = null;
+  for (const s of lista){
+    const r = resultadoSessao(s, aj);
+    if (s.tipo === 'revisao' && r != null){
+      const intervalo = anterior ? diffDias(anterior, s.data) : null;
+      revs.push({ data: s.data, r });
+      if (r >= aj.limiarBom && intervalo != null && (maiorIntervaloBom == null || intervalo > maiorIntervaloBom)) maiorIntervaloBom = intervalo;
+    }
+    anterior = s.data;
+  }
+  const ult = revs.slice(-5);
+  let soma = 0, pesos = 0;
+  for (const x of ult){ const w = pesoRecencia(x.data, ref, aj); soma += w * x.r; pesos += w; }
+  const valor = pesos > 0 ? Math.round(100 * soma / pesos) : null;
+  const suficiente = valor != null && revs.length >= aj.minRevisoesRetencao;
+  return { valor, categoria: suficiente ? categoria(valor, aj) : null, suficiente, revisoes: revs.length, maiorIntervaloBom };
+}
+
 const api = {
   AJUSTES_PADRAO,
+  ordenarSessoes, resultadoSessao, categoria, dominio, retencao,
   colecao, salvarRegistro, excluirRegistro, registrosAtivos, mesclarColecoes, estavel,
   hoje, addDias, diffDias, mesDe, inicioSemana, parseDuracao,
   cronoIniciar, cronoAplicar, cronoEstado, cronoDuracaoMs, cronoDataInicio,

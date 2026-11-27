@@ -128,3 +128,89 @@ test('mescla une o histórico de versões sem repetir', () => {
   assert.deepEqual(m.registros.x.versoes.map(v => v.v), [1, 2]);
   assert.equal(C.mesclarColecoes(null, a).registros.x.v, 2);
 });
+
+/* ---------- Task 3: evidências, domínio e retenção ---------- */
+const AJ = C.AJUSTES_PADRAO;
+const ses = (o) => Object.assign({ id: Math.random().toString(36).slice(2), itemId: 'i1', tipo: 'revisao', metodos: [] }, o);
+const near = (a, b, eps = 0.005) => assert.ok(Math.abs(a - b) <= eps, a + ' ≈ ' + b);
+
+test('resultado da sessão combina as evidências com seus pesos', () => {
+  near(C.resultadoSessao(ses({ questoes: { feitas: 10, acertos: 8 } }), AJ), 0.8);
+  near(C.resultadoSessao(ses({ questoes: { feitas: 2, acertos: 2 }, explicacao: { nota: null, marcados: ['a', 'b'], total: 4 } }), AJ), (0.4 * 1 + 2 * 0.5) / 2.4);
+  near(C.resultadoSessao(ses({ percebida: 'dificil' }), AJ), 0.4);
+  near(C.resultadoSessao(ses({ explicacao: { marcados: ['a', 'b', 'c'], total: 4 } }), AJ), 0.75);
+  near(C.resultadoSessao(ses({ explicacao: { nota: 'pouco' } }), AJ), 0.7);
+  assert.equal(C.resultadoSessao(ses({}), AJ), null);
+  assert.equal(C.resultadoSessao(ses({ questoes: { feitas: 0, acertos: 0 } }), AJ), null);
+});
+
+test('categorias de domínio pelos limites', () => {
+  assert.equal(C.categoria(95, AJ), 'excelente');
+  assert.equal(C.categoria(90, AJ), 'excelente');
+  assert.equal(C.categoria(89, AJ), 'bom');
+  assert.equal(C.categoria(75, AJ), 'bom');
+  assert.equal(C.categoria(60, AJ), 'regular');
+  assert.equal(C.categoria(59, AJ), 'critico');
+});
+
+test('domínio não classifica com pouca evidência', () => {
+  const d = C.dominio([ses({ data: '2026-11-01', questoes: { feitas: 5, acertos: 5 } }), ses({ data: '2026-11-02', questoes: { feitas: 5, acertos: 5 } })], AJ, '2026-11-27');
+  assert.equal(d.suficiente, false);
+  assert.equal(d.categoria, null);
+  assert.equal(d.questoes, 10);
+  assert.equal(d.valor, 100);
+});
+
+test('domínio com evidência suficiente é classificado', () => {
+  const s = ['2026-11-20', '2026-11-22', '2026-11-25'].map(data => ses({ data, questoes: { feitas: 10, acertos: 9 } }));
+  const d = C.dominio(s, AJ, '2026-11-27');
+  assert.equal(d.suficiente, true);
+  assert.equal(d.valor, 90);
+  assert.equal(d.categoria, 'excelente');
+  assert.equal(d.avaliadas, 3);
+});
+
+test('dificuldade percebida recente desconta 5 pontos do domínio', () => {
+  const base = ['2026-11-20', '2026-11-22'].map(data => ses({ data, questoes: { feitas: 10, acertos: 8 } }));
+  const sem = C.dominio(base, AJ, '2026-11-27').valor;
+  const com = C.dominio(base.concat([ses({ data: '2026-11-25', percebida: 'dificil' })]), AJ, '2026-11-27').valor;
+  assert.equal(com, sem - 5);
+});
+
+test('sessão antiga pesa menos no domínio (meia-vida de 60 dias)', () => {
+  const s = [ses({ data: C.addDias('2026-11-27', -240), questoes: { feitas: 10, acertos: 0 } }), ses({ data: '2026-11-27', questoes: { feitas: 10, acertos: 10 } })];
+  assert.equal(C.dominio(s, AJ, '2026-11-27').valor, Math.round(100 * 10 / (10 + 10 / 16)));
+});
+
+test('domínio ignora sessões excluídas e as posteriores à data de referência', () => {
+  const s = [ses({ data: '2026-11-20', questoes: { feitas: 10, acertos: 10 } }), ses({ data: '2026-11-21', questoes: { feitas: 10, acertos: 0 }, excluida: true }), ses({ data: '2026-11-30', questoes: { feitas: 10, acertos: 0 } })];
+  assert.equal(C.dominio(s, AJ, '2026-11-27').valor, 100);
+});
+
+test('retenção usa só revisões e mostra o maior intervalo lembrado', () => {
+  const s = [
+    ses({ data: '2026-10-01', tipo: 'estudo', questoes: { feitas: 10, acertos: 10 } }),
+    ses({ data: '2026-10-16', questoes: { feitas: 10, acertos: 9 } }),
+    ses({ data: '2026-11-15', questoes: { feitas: 10, acertos: 5 } }),
+  ];
+  const r = C.retencao(s, AJ, '2026-11-27');
+  assert.equal(r.revisoes, 2);
+  assert.equal(r.suficiente, true);
+  assert.equal(r.maiorIntervaloBom, 15);
+  assert.ok(r.valor > 50 && r.valor < 90);
+  const so1 = C.retencao(s.slice(0, 2), AJ, '2026-11-27');
+  assert.equal(so1.suficiente, false);
+  assert.equal(so1.categoria, null);
+});
+
+test('domínio e retenção são métricas diferentes', () => {
+  const s = [
+    ses({ data: '2026-11-01', tipo: 'estudo', questoes: { feitas: 30, acertos: 30 } }),
+    ses({ data: '2026-11-08', explicacao: { nota: 'muito' } }),
+    ses({ data: '2026-11-22', explicacao: { nota: 'muito' } }),
+  ];
+  const d = C.dominio(s, AJ, '2026-11-27'), r = C.retencao(s, AJ, '2026-11-27');
+  assert.equal(r.valor, 40);
+  assert.ok(d.valor > 70, 'domínio ' + d.valor);
+  assert.notEqual(d.valor, r.valor);
+});
