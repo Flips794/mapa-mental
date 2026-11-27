@@ -78,17 +78,43 @@ async function subtopicos(mapId, nodeId){
 }
 
 /* ---------- entrada na área ---------- */
+/* relê o que outros aparelhos/abas gravaram (no máximo a cada 2 min, só com a área Estudos aberta e a aba visível) */
+let estUltimaLeitura = Date.now(), estRelendo = false;
+async function estReler(forcar){
+  if (!ED || estRelendo || appMode !== 'est' || document.hidden) return;
+  if (!forcar && Date.now() - estUltimaLeitura < 120000) return;
+  estRelendo = true; estUltimaLeitura = Date.now();
+  try {
+    const r = await ED.atualizar();
+    if (r.mudou && appMode === 'est' && !document.querySelector('.est-modal')){ estRender(); estRenderSidebar(); }
+    else estAtualizarBarra();
+  } catch (e) {} finally { estRelendo = false; }
+}
+/* identidade do armazenamento para a cópia local (repositório + ramo, ou servidor local) */
+function estEscopo(){
+  if (Store.mode === 'github'){
+    const c = ghConfig() || {}; let ramo = ''; try { ramo = localStorage.getItem('mm-github-branch') || ''; } catch (e) {}
+    const repo = (c.owner || '') + '/' + (c.repo || '');
+    return { escopo: 'gh:' + repo.toLowerCase() + (ramo ? '@' + ramo : ''), jornalLegado: repo === GH_DEFAULT_REPO && !ramo };
+  }
+  return { escopo: Store.mode, jornalLegado: false };
+}
 async function estGarantirDados(){
   if (ED) return ED;
   if (!estCarregando){
     estCarregando = (async () => {
-      const d = EstDadosCriar({ store: Store, local: Store.mode === 'local' ? null : Store.local, core: EC });
+      const d = EstDadosCriar({ store: Store, local: Store.mode === 'local' ? null : Store.local, core: EC, ...estEscopo() });
       const r = await d.carregar();
       ED = d;
       if (r.pendentes.length) d.sincronizar().then(() => estAtualizarBarra());
       if (!estSyncTimer){
-        estSyncTimer = setInterval(() => { if (ED && ED.pendentes().length) ED.sincronizar().then(estAtualizarBarra); }, 60000);
-        window.addEventListener('focus', () => { if (ED && ED.pendentes().length) ED.sincronizar().then(estAtualizarBarra); });
+        estSyncTimer = setInterval(() => { if (ED && ED.pendentes().length) ED.sincronizar().then(estAtualizarBarra); else estReler(); }, 60000);
+        window.addEventListener('focus', () => {
+          if (!ED) return;
+          if (ED.pendentes().length) ED.sincronizar().then(estAtualizarBarra);
+          if (appMode === 'est') ED.atualizar(['cronometro']).then(() => { estAtualizarCrono(); estAtualizarBarra(); }).catch(() => {});   // pausa feita em outra aba
+          estReler();
+        });
       }
       return d;
     })();
@@ -200,12 +226,13 @@ EST_VIEWS.hoje = function(body){
 
 /* ---------- Matéria (pela barra lateral) ---------- */
 async function estViewMateria(body, materia){
-  const itens = ED.todas('itens').filter(i => (i.materia || 'Outros') === materia);
+  const daMateria = ED.todas('itens').filter(i => (i.materia || 'Outros') === materia);
+  const itens = daMateria.filter(i => !i.arquivado);
   const spi = estSessoesPorItem();
   const linhas = itens.map(it => ({ item: it, estado: EC.calcularEstado(it, spi.get(it.id) || [], ajustes(), estHoje()) }))
     .sort((a, b) => (a.estado.proxima || '9') < (b.estado.proxima || '9') ? -1 : 1);
   const topicos = (await estTopicos()).filter(t => t.materia === materia && t.depth > 0);
-  const acompanhados = new Set(itens.map(i => i.nodeId).filter(Boolean));
+  const acompanhados = new Set(daMateria.map(i => i.nodeId).filter(Boolean));
   const naoVistos = topicos.filter(t => !acompanhados.has(t.nodeId) && t.depth === 1);
   body.innerHTML = '<div class="est-hoje"><h2 class="est-h2"></h2>'
     + (linhas.length ? '<section class="est-sec"><h3>Assuntos acompanhados (' + linhas.length + ')</h3>' + linhas.map(x => linhaAssunto(x, x.estado.status === 'retomada' ? 'retomar' : 'revisar')).join('') + '</section>' : '<div class="est-vazio">Nenhum assunto desta matéria registrado ainda.</div>')
@@ -226,7 +253,7 @@ async function estAbrirRegistro(o){
   o = o || {};
   const editando = o.sessaoId ? ED.todas('sessoes').find(s => s.id === o.sessaoId) : null;
   const st = {
-    id: editando ? editando.id : ED.novoId(),
+    id: editando ? editando.id : (o.cronometro && o.cronometro.id ? 'cr-' + o.cronometro.id : ED.novoId()),
     itemId: editando ? editando.itemId : o.itemId || null,
     topico: o.topico || null,
     data: editando ? editando.data : (o.data || estHoje()),
@@ -312,6 +339,7 @@ async function estAbrirRegistro(o){
 
   // valores iniciais
   el.querySelector('#erData').value = st.data;
+  el.querySelector('#erData').max = estHoje();
   marcarTipo(tipo);
   el.querySelectorAll('#erMetodos input').forEach(c => { c.checked = metodos.has(c.value); });
   el.querySelector('#erTexto').value = ex.texto || '';
@@ -371,6 +399,7 @@ async function estAbrirRegistro(o){
       it = ja || { id: ED.novoId(), tipo: 'livre', caminho: txt, materia: (mat && mat.value.trim()) || 'Outros' };
     }
     const data = el.querySelector('#erData').value || estHoje();
+    if (data > estHoje()) return erro('A data não pode ser no futuro. Para estudos futuros, use o Planejamento.');
     const s = { id: st.id, itemId: it.id, data, tipo: (el.querySelector('#erTipo input:checked') || {}).value || 'estudo', metodos: [...sel].filter(m => m !== 'questoes' && m !== 'explicacao') };
     if (sel.has('questoes')){
       const f = parseInt(el.querySelector('#erFeitas').value, 10), a = parseInt(el.querySelector('#erAcertos').value, 10);
@@ -393,6 +422,7 @@ async function estAbrirRegistro(o){
     st.salvando = true; el.querySelector('#erSalvar').disabled = true; el.querySelector('#erSalvar').textContent = 'Salvando…';
     try {
       const itemNovo = Object.assign({}, it, { dificil, semRevisao: it.tipo === 'livre' ? semRev : false });
+      delete itemNovo.arquivado;                                // estudou de novo: volta a acompanhar, com o histórico
       await ED.salvarItem(itemNovo);
       await ED.salvarSessao(s);
       for (const [motivo, n] of motivos){
@@ -438,14 +468,15 @@ function estAbrirAssunto(itemId){
           + '</span><span class="r">' + (r == null ? '' : Math.round(r * 100) + '%') + '</span>'
           + (s.explicacao && s.explicacao.texto ? '<button class="ib" data-ver title="Ver o resumo escrito">📝</button>' : '') + '<button class="ib" data-editar title="Editar">✎</button><button class="ib danger" data-excluir title="Excluir">🗑</button></div>';
       }).join('') : '<div class="est-vazio pequeno">Sem registros.</div>') + '</div>'
-    + '<div class="est-row fim"><button class="btn-s" id="adExcluirItem">Parar de acompanhar</button><button class="btn-s primary" id="adRegistrar">' + (e.status === 'retomada' ? 'Registrar retomada' : 'Registrar revisão') + '</button></div>'
+    + '<div class="est-row fim"><button class="btn-s" id="adExcluirItem">' + (it.arquivado ? 'Voltar a acompanhar' : 'Parar de acompanhar') + '</button><button class="btn-s primary" id="adRegistrar">' + (e.status === 'retomada' ? 'Registrar retomada' : 'Registrar revisão') + '</button></div>'
     + '</div>', 'est-box');
   el.querySelector('.est-titulo').textContent = it.caminho;
   el.querySelector('#adDificil').onchange = async (ev) => { await ED.salvarItem(Object.assign({}, it, { dificil: ev.target.checked })); fechar(); estAbrirAssunto(itemId); estRender(); };
   el.querySelector('#adRegistrar').onclick = () => { fechar(); estAbrirRegistro({ itemId, tipo: e.status === 'retomada' ? 'retomada' : 'revisao' }); };
   el.querySelector('#adExcluirItem').onclick = async () => {
-    if (!confirm('Parar de acompanhar "' + it.caminho + '"? As revisões deixam de aparecer. O histórico fica guardado.')) return;
-    await ED.excluirItem(itemId); fechar(); estRender(); estRenderSidebar(); toast('Assunto removido do acompanhamento');
+    if (it.arquivado){ const n = Object.assign({}, it); delete n.arquivado; await ED.salvarItem(n); fechar(); estRender(); estRenderSidebar(); toast('Assunto voltou para as revisões'); return; }
+    if (!confirm('Parar de acompanhar "' + it.caminho + '"? As revisões deixam de aparecer. O histórico fica guardado e volta se você estudar o assunto de novo.')) return;
+    await ED.salvarItem(Object.assign({}, it, { arquivado: true })); fechar(); estRender(); estRenderSidebar(); toast('Assunto fora das revisões (histórico guardado)');
   };
   el.querySelectorAll('.est-h-row').forEach(row => {
     const s = sessoes.find(x => x.id === row.dataset.id);
@@ -481,9 +512,16 @@ function estAtualizarCrono(){
   if (box.classList.contains('alerta')) box.title = 'Cronômetro rodando há mais de ' + ajustes().alertaCronometroHoras + ' horas sem pausa. Esqueceu ligado?';
 }
 async function estCronoAcao(acao){
+  try { await ED.atualizar(['cronometro', 'sessoes']); } catch (e) {}
   const c = ED.cronometroAtivo();
+  const st = c ? EC.cronoEstado(c) : 'parado';
+  if (acao !== 'iniciar' && !c){ toast('Este cronômetro já foi registrado ou descartado em outra aba.'); estAtualizarCrono(); estAtualizarBarra(); return; }
+  if (c && acao !== 'descartar' && ED.todas('sessoes').some(s => s.id === 'cr-' + c.id || (s.cronometro && s.cronometro.id === c.id))){
+    await ED.descartarCronometro(c.id); toast('Este cronômetro já foi registrado em outra aba.'); estAtualizarCrono(); estAtualizarBarra(); return;
+  }
   try {
-    if (acao === 'iniciar') await ED.salvarCronometro(Object.assign(EC.cronoIniciar(Date.now()), { id: ED.novoId() }));
+    if (acao === 'iniciar' && c){ toast(st === 'finalizado' ? 'Há um cronômetro finalizado esperando registro.' : 'Já existe um cronômetro em andamento (talvez iniciado em outra aba).'); }
+    else if (acao === 'iniciar') await ED.salvarCronometro(Object.assign(EC.cronoIniciar(Date.now()), { id: ED.novoId() }));
     else if (acao === 'registrar') estAbrirRegistro({ minutos: Math.max(1, Math.round(EC.cronoDuracaoMs(c, Date.now()) / 60000)), data: EC.cronoDataInicio(c), cronometro: { id: c.id, eventos: c.eventos } });
     else if (acao === 'descartar'){ if (confirm('Descartar o tempo do cronômetro?')) await ED.descartarCronometro(c.id); }
     else if (acao === 'fim'){
@@ -722,6 +760,7 @@ function estAbrirErro(e){
     + '<div class="est-campo"><label>Observação (opcional)</label><textarea id="eObs" rows="3" placeholder="O que confundiu, o enunciado, a regra certa…"></textarea></div>'
     + '<div class="est-msg" id="eMsg"></div><div class="est-row fim"><button class="btn-s" data-fechar>Cancelar</button><button class="btn-s primary" id="eOk">Salvar</button></div></div>', 'est-box');
   el.querySelector('#eData').value = e ? e.data : estHoje();
+  el.querySelector('#eData').max = estHoje();
   if (e){ el.querySelector('#eItem').value = e.itemId || ''; el.querySelector('#eMot').value = e.motivo; el.querySelector('#eQtd').value = e.quantidade || 1; el.querySelector('#eObs').value = e.observacao || ''; }
   el.querySelector('#eOk').onclick = async () => {
     const itemId = el.querySelector('#eItem').value, q = parseInt(el.querySelector('#eQtd').value, 10);
@@ -737,7 +776,7 @@ function estAbrirErro(e){
    Simulados
    ========================================================= */
 EST_VIEWS.simulados = function(body){
-  const criterios = ED.criterios();
+  const criterios = ED.criteriosParaCalculo();
   const ev = EC.evolucaoSimulados(ED.simulados(), criterios);
   const ult = ev[ev.length - 1], melhor = ev.slice().sort((a, b) => b.percentual - a.percentual)[0];
   const media = ev.length ? Math.round(ev.reduce((t, x) => t + x.percentual, 0) / ev.length * 10) / 10 : null;
@@ -764,6 +803,7 @@ EST_VIEWS.simulados = function(body){
 };
 function estAbrirSimulado(s){
   const criterios = ED.criterios();
+  if (s && !criterios.some(c => c.id === s.criterioId)){ const antigo = ED.criteriosParaCalculo().find(c => c.id === s.criterioId); if (antigo) criterios.push(Object.assign({}, antigo, { nome: antigo.nome + ' (excluído)' })); }
   const mats = ws.items.filter(i => i.type === 'map').map(i => i.title);
   const { el, fechar } = estModal('<div class="modal-head"><b>' + (s ? 'Editar simulado' : 'Novo simulado') + '</b><button class="ib" data-fechar>✕</button></div><div class="est-form">'
     + '<div class="est-linha2"><div class="est-campo"><label>Data</label><input type="date" id="sData"></div><div class="est-campo"><label>Concurso</label><input id="sConc" placeholder="ex.: PCDF Perito Criminal"></div><div class="est-campo"><label>Banca</label><input id="sBanca" placeholder="ex.: Cebraspe"></div></div>'
@@ -797,21 +837,27 @@ function estAbrirSimulado(s){
     const porMateria = [...el.querySelectorAll('.est-mat')].map(d => ({ materia: d.querySelector('.mm').value.trim(), questoes: Number(d.querySelector('.mq').value) || 0, acertos: Number(d.querySelector('.ma').value) || 0, erros: Number(d.querySelector('.me').value) || 0 })).filter(m => m.materia);
     const reg = Object.assign({ id: s ? s.id : ED.novoId(), data: $s('#sData').value || estHoje(), concurso: $s('#sConc').value.trim(), banca: $s('#sBanca').value.trim(), criterioId: $s('#sCrit').value, observacao: $s('#sObs').value.trim(), porMateria }, o);
     if (minutos != null) reg.minutos = minutos;
-    await ED.salvarSimulado(reg); fechar(); toast('Simulado salvo · nota ' + EC.notaSimulado(reg, criterios.find(c => c.id === reg.criterioId)).nota); estRender();
+    await ED.salvarSimulado(reg); fechar(); toast('Simulado salvo · nota ' + EC.notaSimulado(reg, ED.criteriosParaCalculo().find(c => c.id === reg.criterioId)).nota); estRender();
   };
 }
 function estAbrirCriterios(){
   const desenhar = () => {
     const cs = ED.criterios();
     box.querySelector('#crLista').innerHTML = cs.map(c => '<div class="est-h-row" data-id="' + esc(c.id) + '"><span class="m"><b>' + esc(c.nome) + '</b> — acerto +' + c.pontosAcerto + ' · erro −' + c.penalidadeErro + ' · branco ' + c.pontosBranco + '</span>' + (c.fixo ? '<span class="est-tag">padrão</span>' : '<button class="ib danger" data-excluir title="Excluir">🗑</button>') + '</div>').join('');
-    box.querySelectorAll('[data-excluir]').forEach(b => b.onclick = async () => { await ED.excluirSimulado(b.closest('[data-id]').dataset.id); desenhar(); });
+    box.querySelectorAll('[data-excluir]').forEach(b => b.onclick = async () => {
+      const id = b.closest('[data-id]').dataset.id, n = ED.simulados().filter(x => x.criterioId === id).length;
+      if (n){ toast('Este critério é usado em ' + n + ' simulado(s); não dá para excluir.'); return; }
+      await ED.excluirSimulado(id); desenhar();
+    });
   };
   const { el: box } = estModal('<div class="modal-head"><b>Critérios de pontuação</b><button class="ib" data-fechar>✕</button></div><div class="est-form"><div class="est-hist" id="crLista"></div>'
     + '<h4 class="est-h4">Novo critério</h4><div class="est-linha2"><div class="est-campo"><label>Nome</label><input id="crNome" placeholder="ex.: FGV — sem penalidade"></div><div class="est-campo"><label>Pontos por acerto</label><input type="number" step="0.01" id="crA" value="1"></div><div class="est-campo"><label>Penalidade por erro</label><input type="number" step="0.01" min="0" id="crE" value="0"></div><div class="est-campo"><label>Pontos por branco</label><input type="number" step="0.01" id="crB" value="0"></div></div>'
     + '<div class="est-row fim"><button class="btn-s primary" id="crAdd">Adicionar critério</button></div></div>', 'est-box');
   box.querySelector('#crAdd').onclick = async () => {
-    const nome = box.querySelector('#crNome').value.trim(); if (!nome) return;
-    await ED.salvarSimulado({ id: ED.novoId(), tipoRegistro: 'criterio', nome, pontosAcerto: Number(box.querySelector('#crA').value) || 0, penalidadeErro: Number(box.querySelector('#crE').value) || 0, pontosBranco: Number(box.querySelector('#crB').value) || 0 });
+    const num = (q) => { const v = box.querySelector(q).value.trim().replace(',', '.'); return v === '' ? NaN : Number(v); };
+    const cr = { id: ED.novoId(), tipoRegistro: 'criterio', nome: box.querySelector('#crNome').value.trim(), pontosAcerto: num('#crA'), penalidadeErro: num('#crE'), pontosBranco: num('#crB') };
+    const errs = EC.validarCriterio(cr); if (errs.length){ toast(errs[0]); return; }
+    await ED.salvarSimulado(cr);
     box.querySelector('#crNome').value = ''; desenhar();
   };
   desenhar();
@@ -834,7 +880,8 @@ EST_VIEWS.desempenho = function(body){
   const tmq = EC.tempoMedioPorQuestao(ss, sims);
   const pendentes = ag.atrasadas.length + ag.hoje.length;
   const estados = ag.estados;
-  const criticos = [...estados.values()].filter(e => e.status === 'retomada' || (e.dominio && e.dominio.suficiente && e.dominio.categoria === 'critico')).length;
+  const acompanhados = new Set(itens.filter(i => !i.arquivado).map(i => i.id));
+  const criticos = [...estados].filter(([id, e]) => acompanhados.has(id) && (e.status === 'retomada' || (e.dominio && e.dominio.suficiente && e.dominio.categoria === 'critico'))).length;
   const prod = EC.produtividade(todasS, de, hojeS);
   // barras por dia: no máximo 90 colunas
   const deSerie = EC.diffDias(de, hojeS) > 89 ? EC.addDias(hojeS, -89) : de;

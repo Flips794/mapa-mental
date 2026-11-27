@@ -18,6 +18,13 @@ function fmtSize(b){ if(!b) return ''; if(b<1024) return b+' B'; if(b<1048576) r
    3) Sem nenhum dos dois: IndexedDB deste navegador. */
 const GH_CFG_KEY='mm-github';
 const GH_DEFAULT_REPO='Flips794/mapa-mental-dados';
+/* endereço da API: o desvio (mm-github-api) só vale com o app aberto em localhost e apontando para localhost —
+   impede que a chave seja enviada a outro servidor */
+function ghApiBase(){
+  let o=null; try{ o=localStorage.getItem('mm-github-api'); }catch(e){}
+  const pagLocal=/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  return (o && pagLocal && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\/?$/.test(o) ? o : 'https://api.github.com').replace(/\/$/,'');
+}
 function ghConfig(){ try{ const c=JSON.parse(localStorage.getItem(GH_CFG_KEY)||'null'); return c && c.owner && c.repo && c.token ? c : null; }catch(e){ return null; } }
 
 const Store = (()=>{
@@ -103,7 +110,7 @@ const Store = (()=>{
 function bytesToB64(u8){ let s=''; for(let i=0;i<u8.length;i+=0x8000) s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return btoa(s); }
 function b64ToBytes(b){ const s=atob(b); const u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u; }
 function GitHubStore(cfg){
-  const api=(localStorage.getItem('mm-github-api')||'https://api.github.com').replace(/\/$/,'');
+  const api=ghApiBase();
   const branch=localStorage.getItem('mm-github-branch')||'';
   const base=api+'/repos/'+encodeURIComponent(cfg.owner)+'/'+encodeURIComponent(cfg.repo)+'/contents/';
   const shas=new Map();
@@ -220,7 +227,9 @@ function GitHubStore(cfg){
       return enqueue(path, async()=>{
         for(let tentativa=0; tentativa<3; tentativa++){
           const cur=await readBytes(path);
-          const final=mesclar(v, cur ? JSON.parse(dec.decode(cur)) : null);
+          const curTxt=cur ? dec.decode(cur) : null;
+          const final=mesclar(v, curTxt ? JSON.parse(curTxt) : null);
+          if(curTxt!==null && JSON.stringify(final)===curTxt) return final;   // nada novo: não cria commit à toa
           if(await putBytes(path, enc.encode(JSON.stringify(final)), 'Salva '+label(k), false)) return final;
           shas.delete(path);   // alguém gravou antes: relê e mescla de novo
         }
@@ -293,7 +302,7 @@ function githubSetupDialog(){
       if(!owner || !name || !token){ msg.textContent='Preencha o repositório (dono/nome) e a chave.'; return; }
       msg.textContent='Verificando…'; msg.className='gh-msg';
       try{
-        const api=(localStorage.getItem('mm-github-api')||'https://api.github.com').replace(/\/$/,'');
+        const api=ghApiBase();
         const r=await fetch(api+'/repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(name),{headers:{'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'},cache:'no-store'});
         if(r.status===401){ msg.textContent='Chave inválida ou vencida.'; msg.className='gh-msg err'; return; }
         if(r.status===404){ msg.textContent='Repositório não encontrado (ou a chave não tem acesso a ele).'; msg.className='gh-msg err'; return; }

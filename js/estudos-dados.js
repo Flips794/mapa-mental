@@ -20,30 +20,48 @@ function EstDadosCriar(opts){
   let offline = false;
 
   const col = (k) => cols.get(k) || C.colecao();
-  const jornal = (k) => 'estlocal:' + k;
+  // a cópia local é separada por armazenamento (repositório/ramo/servidor): trocar de repositório não mistura estudos
+  const jornal = (k) => 'estlocal:' + (opts.escopo ? opts.escopo + '|' : '') + k;
+  const jornalAntigo = (k) => 'estlocal:' + k;     // cópias gravadas antes do escopo existir (só do armazenamento principal)
 
+  /* lê do armazenamento principal e MESCLA com a cópia local e com o que já está na memória
+     (nunca substitui: uma alteração feita enquanto a leitura acontecia continua valendo) */
   async function lerUma(k){
     let remoto = null, falhou = false;
     try { remoto = await store.get(k) || null; } catch (e) { falhou = true; offline = true; }
-    const copia = local ? (await local.get(jornal(k)) || null) : null;
-    const m = C.mesclarColecoes(remoto, copia);
+    let copia = local ? (await local.get(jornal(k)) || null) : null;
+    if (local && opts.escopo && opts.jornalLegado) copia = C.mesclarColecoes(copia, await local.get(jornalAntigo(k)) || null);
+    const antes = cols.get(k) || null;
+    const m = C.mesclarColecoes(C.mesclarColecoes(remoto, copia), antes);
     cols.set(k, m);
-    if (falhou || (copia && C.estavel(m) !== C.estavel(remoto || C.colecao()))) pend.add(k);
+    const temDados = Object.keys(m.registros).length > 0;
+    if ((falhou && temDados) || (!falhou && C.estavel(m) !== C.estavel(remoto || C.colecao()))) pend.add(k);
+    return !antes || C.estavel(antes) !== C.estavel(m);
   }
 
-  async function carregar(){
-    offline = false;
-    await Promise.all(UNICOS.map(t => lerUma(chave(t))));
-    const meses = C.registrosAtivos(col('est:indice')).map(r => r.id);
-    await Promise.all(meses.map(id => lerUma('est:' + id)));
-    return { offline, pendentes: [...pend] };
+  /* relê tudo (ou só alguns tipos) — usado ao abrir, ao voltar para a aba e antes de mexer no cronômetro */
+  async function atualizar(tipos){
+    if (!tipos) offline = false;
+    const unicos = tipos ? UNICOS.filter(t => tipos.includes(t) || (t === 'indice' && tipos.some(x => MENSAIS.includes(x)))) : UNICOS;
+    const r1 = await Promise.all(unicos.map(t => lerUma(chave(t))));
+    const mensais = tipos ? MENSAIS.filter(t => tipos.includes(t)) : MENSAIS;
+    const meses = C.registrosAtivos(col('est:indice')).filter(r => mensais.includes(r.tipo)).map(r => r.id);
+    const r2 = await Promise.all(meses.map(id => lerUma('est:' + id)));
+    return { offline, pendentes: [...pend], mudou: r1.concat(r2).some(Boolean) };
+  }
+  const carregar = () => atualizar();
+
+  /* cópia local: junta com a que já existe (outra aba do mesmo navegador pode ter gravado nela) */
+  async function gravarJornal(k, v){
+    const cur = await local.get(jornal(k)) || null;
+    await local.set(jornal(k), C.mesclarColecoes(cur, v));
   }
 
   /* grava: primeiro a cópia local, depois o armazenamento principal (mesclando com o que já está lá) */
   function gravar(k){
     const anterior = filas.get(k) || Promise.resolve();
     const p = anterior.then(async () => {
-      if (local) await local.set(jornal(k), col(k));
+      if (local) await gravarJornal(k, col(k));
       pend.add(k);
       return enviar(k);
     });
@@ -54,9 +72,11 @@ function EstDadosCriar(opts){
     let res = null;
     try { res = await store.setMesclando(k, col(k), C.mesclarColecoes); } catch (e) { res = null; }
     if (!res) return false;
-    cols.set(k, res);
-    if (local) await local.set(jornal(k), res);
-    pend.delete(k);
+    // junta com a memória: o que foi alterado durante o envio continua (e segue pendente até subir)
+    const m = C.mesclarColecoes(res, cols.get(k) || null);
+    cols.set(k, m);
+    if (local) await gravarJornal(k, m);
+    if (C.estavel(m) === C.estavel(res)) pend.delete(k);
     return true;
   }
   async function sincronizar(){
@@ -76,12 +96,13 @@ function EstDadosCriar(opts){
 
   /* todas as versões de um tipo mensal juntas: a cópia ativa vence a excluída (sessão movida de mês) */
   function todasMensal(tipo){
-    const porId = new Map();
+    const porId = new Map(), excluidosDeVez = new Set();
     for (const mes of mesesDe(tipo)) for (const r of Object.values(col(chave(tipo, mes)).registros)){
+      if (C.excluidaDeVez(r)) excluidosDeVez.add(r.id);
       const atual = porId.get(r.id);
       if (!atual || (atual.excluida && !r.excluida) || (!!atual.excluida === !!r.excluida && (r.atualizadoEm || '') > (atual.atualizadoEm || ''))) porId.set(r.id, r);
     }
-    return [...porId.values()].filter(r => !r.excluida);
+    return [...porId.values()].filter(r => !r.excluida && !excluidosDeVez.has(r.id));   // exclusão em qualquer mês vale para todos
   }
   function todas(tipo){ return MENSAIS.includes(tipo) ? todasMensal(tipo) : C.registrosAtivos(col(chave(tipo))); }
   function mesDoRegistro(tipo, id){
@@ -92,9 +113,8 @@ function EstDadosCriar(opts){
   async function salvarMensal(tipo, reg){
     const mes = C.mesDe(reg.data), antigo = mesDoRegistro(tipo, reg.id), trabalhos = [];
     if (antigo && antigo !== mes){
-      const k = chave(tipo, antigo), velho = col(k).registros[reg.id];
-      let c = C.salvarRegistro(col(k), Object.assign({}, velho, { movidaPara: mes }), agora());
-      cols.set(k, C.excluirRegistro(c, reg.id, agora()));
+      const k = chave(tipo, antigo);
+      cols.set(k, C.moverRegistro(col(k), reg.id, mes, agora()));
       trabalhos.push(gravar(k));
     }
     const k = chave(tipo, mes);
@@ -124,7 +144,7 @@ function EstDadosCriar(opts){
   }
 
   return {
-    carregar, sincronizar, novoId,
+    carregar, atualizar, sincronizar, novoId,
     pendentes: () => [...pend],
     estaOffline: () => offline,
     todas,
@@ -169,6 +189,11 @@ function EstDadosCriar(opts){
     criterios(){
       const proprios = todas('simulados').filter(r => r.tipoRegistro === 'criterio');
       return C.CRITERIOS_PADRAO.concat(proprios);
+    },
+    /* para calcular notas: inclui critérios excluídos (o simulado antigo mantém a nota com que foi feito) */
+    criteriosParaCalculo(){
+      const todosProprios = Object.values(col('est:simulados').registros).filter(r => r.tipoRegistro === 'criterio');
+      return C.CRITERIOS_PADRAO.concat(todosProprios);
     },
 
     cronometroAtivo(){

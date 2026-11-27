@@ -550,13 +550,20 @@ async function exportAll(){
     }
   }
   // Estudos (registros, revisões, planos, erros, simulados, ajustes)
-  if(typeof estGarantirDados==='function'){ try{ const ed=await estGarantirDados(); out.estudos=ed.exportar(); }catch(e){ console.warn('Estudos fora do backup', e); toast('Atenção: não consegui incluir os Estudos no backup.'); } }
+  let estAviso='';
+  if(typeof estGarantirDados==='function'){
+    try{
+      const ed=await estGarantirDados();
+      if(Store.remote){ const r=await ed.atualizar(); if(r.offline) estAviso=' Atenção: sem conexão — os Estudos saíram da cópia deste navegador e podem estar incompletos.'; }
+      out.estudos=ed.exportar();
+    }catch(e){ console.warn('Estudos fora do backup', e); estAviso=' Atenção: não consegui incluir os Estudos no backup.'; }
+  }
   const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
   const url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download='mapa-mental-tudo-'+new Date().toISOString().slice(0,10)+'.json';
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   setStatus('Pronto ✓');
-  toast('Backup de tudo exportado: '+out.items.length+' itens.');
+  toast('Backup de tudo exportado: '+out.items.length+' itens.'+estAviso);
 }
 async function importBackup(obj){
   await mapFlush(); await docFlush();

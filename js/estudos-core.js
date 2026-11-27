@@ -99,13 +99,39 @@ function salvarRegistro(col, reg, agoraISO){
     atualizadoEm: agoraISO,
     versoes: atual ? (atual.versoes || []).concat([Object.assign(conteudo(atual), { criadoEm: atual.criadoEm, atualizadoEm: atual.atualizadoEm, em: agoraISO })]) : [],
   });
-  if (atual && atual.excluida){ r.excluida = true; r.excluidaEm = atual.excluidaEm; }
+  if (atual && excluidaDeVez(atual)){ r.excluida = true; r.excluidaEm = atual.excluidaEm; }
+  else delete r.movidaPara;              // lápide de mudança de mês: salvar de novo aqui traz o registro de volta
   return { versao: col.versao || 1, registros: Object.assign({}, col.registros, { [reg.id]: r }) };
 }
+/* exclusão de verdade: nunca é desfeita (nem por edição mais nova de outro aparelho) */
+const excluidaDeVez = (r) => !!(r && r.excluida && !r.movidaPara);
 function excluirRegistro(col, id, agoraISO){
   const atual = col && col.registros[id];
+  if (!atual || excluidaDeVez(atual)) return col;
+  const r = Object.assign({}, atual, { excluida: true, excluidaEm: agoraISO, atualizadoEm: agoraISO });
+  delete r.movidaPara;
+  return { versao: col.versao || 1, registros: Object.assign({}, col.registros, { [id]: r }) };
+}
+/* lápide de mudança de mês: o registro passou a morar em outro arquivo; a versão mais nova decide */
+function moverRegistro(col, id, para, agoraISO){
+  const atual = col && col.registros[id];
   if (!atual || atual.excluida) return col;
-  return { versao: col.versao || 1, registros: Object.assign({}, col.registros, { [id]: Object.assign({}, atual, { excluida: true, excluidaEm: agoraISO, atualizadoEm: agoraISO }) }) };
+  return { versao: col.versao || 1, registros: Object.assign({}, col.registros, { [id]: Object.assign({}, atual, { excluida: true, movidaPara: para, excluidaEm: agoraISO, atualizadoEm: agoraISO }) }) };
+}
+/* eventos do cronômetro vindos de abas/aparelhos diferentes: une, ordena e descarta transições impossíveis */
+const ORDEM_EVENTO = { inicio: 0, retomada: 1, pausa: 2, fim: 3 };
+function normalizarEventos(evs){
+  const vistos = new Map();
+  for (const e of evs || []) if (e && e.t && e.em) vistos.set(e.t + '|' + e.em, e);
+  const ord = [...vistos.values()].sort((a, b) => a.em < b.em ? -1 : a.em > b.em ? 1 : ORDEM_EVENTO[a.t] - ORDEM_EVENTO[b.t]);
+  const out = []; let est = 'parado';
+  for (const e of ord){
+    const ok = (e.t === 'inicio' && est === 'parado') || (e.t === 'pausa' && est === 'rodando') || (e.t === 'retomada' && est === 'pausado') || (e.t === 'fim' && (est === 'rodando' || est === 'pausado'));
+    if (!ok) continue;
+    out.push(e);
+    est = e.t === 'fim' ? 'finalizado' : e.t === 'pausa' ? 'pausado' : 'rodando';
+  }
+  return out;
 }
 function registrosAtivos(col){ return col ? Object.values(col.registros).filter(r => !r.excluida) : []; }
 function mesclarRegistro(a, b){
@@ -115,10 +141,11 @@ function mesclarRegistro(a, b){
   const vistos = new Map();
   for (const v of (a.versoes || []).concat(b.versoes || [])) vistos.set((v.em || '') + estavel(conteudo(v)), v);
   r.versoes = [...vistos.entries()].sort((x, y) => x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0).map(e => e[1]);
-  if (a.excluida || b.excluida){
-    r.excluida = true;
-    r.excluidaEm = [a.excluidaEm, b.excluidaEm].filter(Boolean).sort().pop() || r.atualizadoEm;
+  if (excluidaDeVez(a) || excluidaDeVez(b)){
+    r.excluida = true; delete r.movidaPara;
+    r.excluidaEm = [a, b].filter(excluidaDeVez).map(x => x.excluidaEm).filter(Boolean).sort().pop() || r.atualizadoEm;
   }
+  if (Array.isArray(a.eventos) && Array.isArray(b.eventos)) r.eventos = normalizarEventos(a.eventos.concat(b.eventos));
   return r;
 }
 function mesclarColecoes(a, b){
@@ -145,17 +172,37 @@ function valorExplicacao(e, aj){
   return null;
 }
 /* Resultado de recuperação de uma sessão (0–1), ou null sem evidência (spec 7.1) */
+function resultadoEvidencias(ev, aj){
+  let soma = 0, pesos = 0;
+  if (ev.feitas > 0){
+    const w = aj.pesoQuestoes * Math.min(1, ev.feitas / aj.refQuestoes);
+    soma += w * (Math.min(ev.acertos, ev.feitas) / ev.feitas); pesos += w;
+  }
+  if (ev.explicacao != null){ soma += aj.pesoExplicacao * ev.explicacao; pesos += aj.pesoExplicacao; }
+  if (ev.percebida && aj.percebidaValor[ev.percebida] != null){ soma += aj.pesoPercebida * aj.percebidaValor[ev.percebida]; pesos += aj.pesoPercebida; }
+  return pesos > 0 ? soma / pesos : null;
+}
 function resultadoSessao(s, aj){
   aj = aj || AJUSTES_PADRAO;
-  let soma = 0, pesos = 0;
-  if (s.questoes && s.questoes.feitas > 0){
-    const w = aj.pesoQuestoes * Math.min(1, s.questoes.feitas / aj.refQuestoes);
-    soma += w * (Math.min(s.questoes.acertos, s.questoes.feitas) / s.questoes.feitas); pesos += w;
+  const f = s.questoes && s.questoes.feitas > 0 ? s.questoes.feitas : 0;
+  return resultadoEvidencias({ feitas: f, acertos: f ? s.questoes.acertos : 0, explicacao: valorExplicacao(s.explicacao, aj), percebida: s.percebida }, aj);
+}
+/* Várias sessões no mesmo dia são uma ocasião só: questões somadas, média das explicações, última percepção */
+function resultadoDia(ss, aj){
+  aj = aj || AJUSTES_PADRAO;
+  if (ss.length === 1) return resultadoSessao(ss[0], aj);
+  let feitas = 0, acertos = 0, exs = [], percebida = null;
+  for (const s of ss){
+    if (s.questoes && s.questoes.feitas > 0){ feitas += s.questoes.feitas; acertos += Math.min(s.questoes.acertos, s.questoes.feitas); }
+    const v = valorExplicacao(s.explicacao, aj); if (v != null) exs.push(v);
+    if (s.percebida) percebida = s.percebida;
   }
-  const r = valorExplicacao(s.explicacao, aj);
-  if (r != null){ soma += aj.pesoExplicacao * r; pesos += aj.pesoExplicacao; }
-  if (s.percebida && aj.percebidaValor[s.percebida] != null){ soma += aj.pesoPercebida * aj.percebidaValor[s.percebida]; pesos += aj.pesoPercebida; }
-  return pesos > 0 ? soma / pesos : null;
+  return resultadoEvidencias({ feitas, acertos, explicacao: exs.length ? exs.reduce((t, v) => t + v, 0) / exs.length : null, percebida }, aj);
+}
+function porDia(lista){
+  const dias = [];
+  for (const s of lista){ const d = dias[dias.length - 1]; if (d && d.data === s.data) d.sessoes.push(s); else dias.push({ data: s.data, sessoes: [s] }); }
+  return dias;
 }
 function categoria(valor, aj){
   const c = (aj || AJUSTES_PADRAO).categorias;
@@ -167,15 +214,17 @@ function dominio(sessoes, aj, refData){
   aj = aj || AJUSTES_PADRAO;
   const lista = ordenarSessoes(sessoes).filter(s => !refData || s.data <= refData);
   const ref = refData || (lista.length ? lista[lista.length - 1].data : hoje());
-  let qa = 0, qn = 0, questoes = 0, er = 0, ew = 0, avaliadas = 0, ultimaPercebida = null;
+  let qa = 0, qn = 0, questoes = 0, er = 0, ew = 0, ultimaPercebida = null;
+  const diasAvaliados = new Set();
   for (const s of lista){
     const w = pesoRecencia(s.data, ref, aj);
     if (s.questoes && s.questoes.feitas > 0){ qa += w * Math.min(s.questoes.acertos, s.questoes.feitas); qn += w * s.questoes.feitas; questoes += s.questoes.feitas; }
     const r = valorExplicacao(s.explicacao, aj);
     if (r != null){ er += w * r; ew += w; }
     if (s.percebida) ultimaPercebida = s.percebida;
-    if (resultadoSessao(s, aj) != null) avaliadas++;
+    if (resultadoSessao(s, aj) != null) diasAvaliados.add(s.data);
   }
+  const avaliadas = diasAvaliados.size;
   const Q = qn > 0 ? qa / qn : null, R = ew > 0 ? er / ew : null;
   let base = Q != null && R != null ? aj.pesoDominioQuestoes * Q + aj.pesoDominioExplicacao * R : Q != null ? Q : R;
   let valor = null;
@@ -193,14 +242,15 @@ function retencao(sessoes, aj, refData){
   const ref = refData || (lista.length ? lista[lista.length - 1].data : hoje());
   const revs = [];
   let anterior = null, maiorIntervaloBom = null;
-  for (const s of lista){
-    const r = resultadoSessao(s, aj);
-    if (s.tipo === 'revisao' && r != null){
-      const intervalo = anterior ? diffDias(anterior, s.data) : null;
-      revs.push({ data: s.data, r });
+  for (const dia of porDia(lista)){
+    const rs = dia.sessoes.filter(s => s.tipo === 'revisao');
+    const r = rs.length ? resultadoDia(rs, aj) : null;
+    if (r != null){
+      const intervalo = anterior ? diffDias(anterior, dia.data) : null;
+      revs.push({ data: dia.data, r });
       if (r >= aj.limiarBom && intervalo != null && (maiorIntervaloBom == null || intervalo > maiorIntervaloBom)) maiorIntervaloBom = intervalo;
     }
-    anterior = s.data;
+    anterior = dia.data;
   }
   const ult = revs.slice(-5);
   let soma = 0, pesos = 0;
@@ -222,28 +272,30 @@ function escadaDo(item, aj){
 function calcularEstado(item, sessoes, aj, hojeStr){
   aj = aj || AJUSTES_PADRAO;
   hojeStr = hojeStr || hoje();
-  const lista = ordenarSessoes(sessoes);
+  const lista = ordenarSessoes(sessoes).filter(s => s.data <= hojeStr);   // data no futuro não conta ainda
   const escada = escadaDo(item, aj), maxNormal = escada.length - 2, extra = escada.length - 1;
   const fim = (extraCampos) => Object.assign({
     dominio: dominio(lista, aj, hojeStr), retencao: retencao(lista, aj, hojeStr),
   }, extraCampos);
   if (!lista.length) return fim({ status: item && item.semRevisao ? 'sem-revisao' : 'novo', degrau: null, intervalo: null, ultima: null, proxima: null, atrasoDias: 0, diagnostico: null, baixasSeguidas: 0, revisoes: 0 });
   let degrau = null, baixas = 0, status = 'ativo', diagnostico = null, revisoes = 0, ultimoR = null;
-  lista.forEach((s, i) => {
-    if (s.tipo === 'revisao') revisoes++;
-    const r = resultadoSessao(s, aj);
-    if (degrau === null || s.tipo === 'retomada'){             // primeiro estudo ou retomada: recomeça
+  porDia(lista).forEach((dia) => {                              // um passo da escada por dia
+    const ss = dia.sessoes;
+    if (ss.some(s => s.tipo === 'revisao')) revisoes++;
+    const r = resultadoDia(ss, aj);
+    const percebida = ss.reduce((p, s) => s.percebida || p, null);
+    if (degrau === null || ss.some(s => s.tipo === 'retomada')){   // primeiro estudo ou retomada: recomeça
       degrau = 0; baixas = 0; status = 'ativo'; diagnostico = null;
       if (r != null) ultimoR = r;
       return;
     }
     if (r == null) return;                                      // sem evidência: mantém o degrau
-    const antes = dominio(lista.slice(0, i), aj, s.data);       // domínio de ANTES desta revisão
+    const antes = dominio(lista.filter(x => x.data < dia.data), aj, dia.data);   // domínio de ANTES deste dia
     if (r >= aj.limiarBom){
       baixas = 0; status = 'ativo';
       const consolidado = antes.suficiente && antes.valor >= aj.dominioConsolidado && ultimoR != null && ultimoR >= aj.limiarBom;
       if (consolidado){ degrau = Math.min(degrau + 2, extra); diagnostico = 'consolidado'; }
-      else { diagnostico = 'progresso'; if (s.percebida !== 'dificil' && degrau < maxNormal) degrau++; }
+      else { diagnostico = 'progresso'; if (percebida !== 'dificil' && degrau < maxNormal) degrau++; }
     } else if (r >= aj.limiarBaixo){
       baixas = 0; status = 'ativo'; diagnostico = 'estavel';
     } else {
@@ -270,6 +322,7 @@ function agenda(itens, sessoesPorItem, aj, hojeStr){
     if (!it || it.excluida) continue;
     const estado = calcularEstado(it, sessoesPorItem.get(it.id) || [], aj, hojeStr);
     out.estados.set(it.id, estado);
+    if (it.arquivado) continue;                                 // parou de acompanhar: fora da fila, histórico mantido
     if (estado.status === 'retomada') out.retomar.push({ item: it, estado });
     else if (estado.status === 'ativo' && estado.proxima){
       if (estado.proxima < hojeStr) out.atrasadas.push({ item: it, estado });
@@ -422,6 +475,14 @@ function validarSimulado(s){
   else if (s.acertos + s.erros + s.brancos !== s.questoes) erros.push('Acertos + erros + em branco (' + (s.acertos + s.erros + s.brancos) + ') precisa ser igual ao total de questões (' + s.questoes + ').');
   return erros;
 }
+function validarCriterio(c){
+  const erros = [], num = (v) => typeof v === 'number' && isFinite(v);
+  if (!String(c.nome || '').trim()) erros.push('Dê um nome ao critério.');
+  if (!(num(c.pontosAcerto) && c.pontosAcerto > 0)) erros.push('Pontos por acerto precisam ser maiores que zero.');
+  if (!(num(c.penalidadeErro) && c.penalidadeErro >= 0)) erros.push('A penalidade por erro não pode ser negativa (ela já é descontada).');
+  if (!num(c.pontosBranco)) erros.push('Pontos por questão em branco precisam ser um número.');
+  return erros;
+}
 function notaSimulado(s, criterio){
   const c = criterio || CRITERIOS_PADRAO[1];
   const nota = Math.round(((s.acertos || 0) * c.pontosAcerto - (s.erros || 0) * c.penalidadeErro + (s.brancos || 0) * c.pontosBranco) * 100) / 100;
@@ -441,6 +502,7 @@ function pontosFracos(itens, estados, estatErros){
   const errosPorItem = new Map(((estatErros && estatErros.porAssunto) || []).map(a => [a.item.id, a.total]));
   const out = [];
   for (const it of unicos(itens)){
+    if (it.arquivado) continue;                    // parou de acompanhar
     const e = estados.get(it.id); if (!e) continue;
     const motivos = []; let peso = 0;
     if (e.status === 'retomada'){ motivos.push('Retomada recomendada'); peso += 3; }
@@ -485,10 +547,10 @@ const api = {
   AJUSTES_PADRAO, validarAjustes,
   unicos, resumoDia, serieDiaria, porAssunto, porMateria, evolucaoMensal, tempoMedioPorQuestao, produtividade,
   planoStatus, realizadoDoPlano, resumoSemana, reagendarPlano,
-  MOTIVOS_ERRO, estatisticasErros, CRITERIOS_PADRAO, validarSimulado, notaSimulado, evolucaoSimulados, pontosFracos,
+  MOTIVOS_ERRO, estatisticasErros, CRITERIOS_PADRAO, validarSimulado, validarCriterio, notaSimulado, evolucaoSimulados, pontosFracos,
   escadaDo, calcularEstado, agenda,
-  ordenarSessoes, resultadoSessao, categoria, dominio, retencao,
-  colecao, salvarRegistro, excluirRegistro, registrosAtivos, mesclarColecoes, estavel,
+  ordenarSessoes, resultadoSessao, resultadoDia, categoria, dominio, retencao,
+  colecao, salvarRegistro, excluirRegistro, moverRegistro, excluidaDeVez, normalizarEventos, registrosAtivos, mesclarColecoes, estavel,
   hoje, addDias, diffDias, mesDe, inicioSemana, parseDuracao,
   cronoIniciar, cronoAplicar, cronoEstado, cronoDuracaoMs, cronoDataInicio,
   _hoje: null,

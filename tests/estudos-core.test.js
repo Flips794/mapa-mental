@@ -435,3 +435,69 @@ test('validarAjustes: padrões são válidos; valores que quebram os cálculos s
   assert.deepEqual(ruim({ refQuestoes: 0 }), ['refQuestoes']);
   assert.deepEqual(ruim({ recorrenteN: 0 }), ['recorrenteN']);
 });
+
+/* ---------- Auditoria ---------- */
+test('auditoria: duas sessões no mesmo dia contam como um dia só (a revisão de 1 dia não é pulada)', () => {
+  const s = [q('2026-11-01', 10, 10, { tipo: 'estudo' }), q('2026-11-01', 10, 10, { tipo: 'revisao', explicacao: { nota: 'completo' } })];
+  const e = C.calcularEstado(item(), s, AJ, '2026-11-01');
+  assert.equal(e.degrau, 0);
+  assert.equal(e.proxima, '2026-11-02');
+});
+
+test('auditoria: revisões no mesmo dia contam como uma revisão na retenção', () => {
+  const s = [q('2026-11-01', 8, 10, { tipo: 'estudo' }), q('2026-11-02', 9, 10, { tipo: 'revisao' }), q('2026-11-02', 10, 10, { tipo: 'revisao' })];
+  assert.equal(C.retencao(s, AJ, '2026-11-02').revisoes, 1);
+});
+
+test('auditoria: sessão com data no futuro não mexe na escada de hoje', () => {
+  const s = [q('2026-11-20', 7, 10, { tipo: 'estudo' }), q('2026-12-20', 10, 10)];
+  const e = C.calcularEstado(item(), s, AJ, '2026-11-20');
+  assert.equal(e.proxima, '2026-11-21');
+  assert.equal(e.degrau, 0);
+});
+
+test('auditoria: assunto arquivado sai da agenda, mas o estado continua calculável', () => {
+  const it = item({ arquivado: true });
+  const ag = C.agenda([it], new Map([['i1', [q('2026-11-01', 9, 10, { tipo: 'estudo' })]]]), AJ, '2026-11-20');
+  assert.equal(ag.atrasadas.length + ag.hoje.length + ag.retomar.length, 0);
+});
+
+test('auditoria: sessão movida de mês (lápide) e trazida de volta revive; exclusão real continua definitiva', () => {
+  let col = C.salvarRegistro(C.colecao(), { id: 's', data: '2026-11-30' }, '2026-11-27T10:00:00Z');
+  col = C.moverRegistro(col, 's', '2026-12', '2026-11-27T10:01:00Z');
+  assert.equal(C.registrosAtivos(col).length, 0);
+  const voltou = C.salvarRegistro(col, { id: 's', data: '2026-11-29' }, '2026-11-27T10:02:00Z');
+  assert.equal(C.registrosAtivos(voltou).length, 1);
+  // outro aparelho ainda com a lápide: a versão revivida (mais nova) vence
+  assert.equal(C.registrosAtivos(C.mesclarColecoes(col, voltou)).length, 1);
+  assert.equal(C.registrosAtivos(C.mesclarColecoes(voltou, col)).length, 1);
+  // exclusão real nunca é desfeita, nem por edição mais nova
+  const excl = C.excluirRegistro(voltou, 's', '2026-11-27T10:03:00Z');
+  const velhoEditado = C.salvarRegistro(voltou, { id: 's', data: '2026-11-28' }, '2026-11-27T10:04:00Z');
+  assert.equal(C.registrosAtivos(C.mesclarColecoes(excl, velhoEditado)).length, 0);
+  assert.equal(C.registrosAtivos(C.salvarRegistro(excl, { id: 's', data: '2026-11-28' }, '2026-11-27T10:05:00Z')).length, 0);
+});
+
+test('auditoria: cronômetro alterado em duas abas junta os eventos (pausa não se perde)', () => {
+  const t0 = Date.parse('2026-11-27T10:00:00Z');
+  const base = C.salvarRegistro(C.colecao(), Object.assign(C.cronoIniciar(t0), { id: 'cr' }), '2026-11-27T10:00:00Z');
+  const comPausa = C.salvarRegistro(base, Object.assign(C.cronoAplicar(base.registros.cr, 'pausa', t0 + 10 * 60000), { id: 'cr' }), '2026-11-27T10:10:00Z');
+  const comFim = C.salvarRegistro(base, Object.assign(C.cronoAplicar(base.registros.cr, 'fim', t0 + 30 * 60000), { id: 'cr' }), '2026-11-27T10:30:00Z');
+  for (const m of [C.mesclarColecoes(comPausa, comFim), C.mesclarColecoes(comFim, comPausa)]){
+    assert.deepEqual(m.registros.cr.eventos.map(e => e.t), ['inicio', 'pausa', 'fim']);
+    assert.equal(C.cronoDuracaoMs(m.registros.cr, t0 + 60 * 60000), 10 * 60000);
+  }
+});
+
+test('auditoria: critério de pontuação precisa de nome e ponto por acerto positivo', () => {
+  assert.deepEqual(C.validarCriterio({ nome: 'X', pontosAcerto: 1, penalidadeErro: 0.25, pontosBranco: 0 }), []);
+  assert.ok(C.validarCriterio({ nome: 'X', pontosAcerto: 0, penalidadeErro: 0, pontosBranco: 0 }).length);
+  assert.ok(C.validarCriterio({ nome: 'X', pontosAcerto: 1, penalidadeErro: -1, pontosBranco: 0 }).length);
+  assert.ok(C.validarCriterio({ nome: ' ', pontosAcerto: 1, penalidadeErro: 0, pontosBranco: 0 }).length);
+});
+
+test('auditoria: assunto arquivado não aparece em pontos fracos', () => {
+  const it = item({ arquivado: true });
+  const estados = new Map([['i1', { status: 'retomada', dominio: { categoria: 'critico' }, retencao: {} }]]);
+  assert.deepEqual(C.pontosFracos([it], estados, null), []);
+});

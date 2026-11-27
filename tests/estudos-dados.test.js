@@ -168,3 +168,97 @@ test('depois de sincronizar com sucesso, deixa de indicar "sem conexão"', async
   assert.equal(await b.sincronizar(), true);
   assert.equal(b.estaOffline(), false);
 });
+
+/* ---------- Auditoria ---------- */
+test('auditoria: alteração feita durante um envio lento não se perde', async () => {
+  const store = storeFalso(), local = localFalso();
+  const orig = store.setMesclando.bind(store);
+  let liberar, primeira = true; const portao = new Promise(r => { liberar = r; });
+  store.setMesclando = async (k, v, m) => { if (primeira && k === 'est:sessoes-2026-11'){ primeira = false; await portao; } return orig(k, v, m); };
+  const a = criar(store, local); await a.carregar();
+  const s1 = sessao(), s2 = sessao();
+  const p1 = a.salvarSessao(s1);
+  await new Promise(r => setTimeout(r, 5));
+  const p2 = a.salvarSessao(s2);
+  liberar(); await p1; await p2;
+  const ids = [s1.id, s2.id].sort();
+  assert.deepEqual(a.todas('sessoes').map(s => s.id).sort(), ids);
+  assert.deepEqual(Object.keys(store.map.get('est:sessoes-2026-11').registros).sort(), ids);
+  assert.deepEqual(Object.keys(local.map.get('estlocal:est:sessoes-2026-11').registros).sort(), ids);
+});
+
+test('auditoria: duas abas sem internet no mesmo navegador não apagam o registro uma da outra', async () => {
+  const store = storeFalso(), local = localFalso();
+  const a = criar(store, local), b = criar(store, local); await a.carregar(); await b.carregar();
+  store.falhar = true;
+  const sa = sessao(), sb = sessao();
+  await a.salvarSessao(sa); await b.salvarSessao(sb);
+  store.falhar = false;
+  const c = criar(store, local); await c.carregar(); await c.sincronizar();
+  assert.deepEqual(Object.keys(store.map.get('est:sessoes-2026-11').registros).sort(), [sa.id, sb.id].sort());
+});
+
+test('auditoria: sessão movida para outro mês e depois de volta continua existindo', async () => {
+  const store = storeFalso(); const a = criar(store, localFalso()); await a.carregar();
+  const s = sessao({ data: '2026-11-30' }); await a.salvarSessao(s);
+  await a.salvarSessao(Object.assign(clone(s), { data: '2026-12-01' }));
+  await a.salvarSessao(Object.assign(clone(s), { data: '2026-11-29' }));
+  const b = criar(store, localFalso()); await b.carregar();
+  assert.deepEqual(b.todas('sessoes').map(x => x.data), ['2026-11-29']);
+  assert.deepEqual(a.todas('sessoes').map(x => x.data), ['2026-11-29']);
+});
+
+test('auditoria: aparelho aberto há horas enxerga o que outro aparelho registrou, sem perder o que é seu', async () => {
+  const store = storeFalso(), local = localFalso();
+  const a = criar(store, local); await a.carregar();
+  const b = criar(store, localFalso()); await b.carregar();
+  store.falhar = true; const sa = sessao(); await a.salvarSessao(sa); store.falhar = false;   // a ainda não enviou
+  const sb = sessao(); await b.salvarSessao(sb);
+  await a.atualizar();
+  assert.deepEqual(a.todas('sessoes').map(x => x.id).sort(), [sa.id, sb.id].sort());
+  assert.ok(a.pendentes().includes('est:sessoes-2026-11'));
+  await a.sincronizar();
+  assert.deepEqual(Object.keys(store.map.get('est:sessoes-2026-11').registros).sort(), [sa.id, sb.id].sort());
+});
+
+test('auditoria: cronômetro pausado em outra aba aparece antes de finalizar aqui', async () => {
+  const store = storeFalso();
+  const a = criar(store, localFalso()), b = criar(store, localFalso()); await a.carregar();
+  const t0 = Date.parse('2026-11-27T10:00:00Z');
+  await a.salvarCronometro(Object.assign(C.cronoIniciar(t0), { id: 'cr' }));
+  await b.carregar();
+  await a.salvarCronometro(Object.assign(C.cronoAplicar(a.cronometroAtivo(), 'pausa', t0 + 10 * 60000), { id: 'cr' }));
+  await b.atualizar(['cronometro']);
+  assert.equal(C.cronoEstado(b.cronometroAtivo()), 'pausado');
+});
+
+test('auditoria: excluir um critério próprio não muda a nota dos simulados que o usaram', async () => {
+  const store = storeFalso(); const a = criar(store, localFalso()); await a.carregar();
+  await a.salvarSimulado({ id: 'cr', tipoRegistro: 'criterio', nome: 'Banca X', pontosAcerto: 2, penalidadeErro: 0.5, pontosBranco: 0 });
+  await a.salvarSimulado({ id: 'sm1', data: '2026-11-27', criterioId: 'cr', questoes: 10, acertos: 6, erros: 4, brancos: 0 });
+  await a.excluirSimulado('cr');
+  assert.deepEqual(a.criterios().map(c => c.id), ['cebraspe', 'simples']);
+  const ev = C.evolucaoSimulados(a.simulados(), a.criteriosParaCalculo());
+  assert.equal(ev[0].nota, 10);   // 6×2 − 4×0,5
+});
+
+test('auditoria: cópia local de outro repositório não vaza para este', async () => {
+  const local = localFalso(), storeX = storeFalso(), storeY = storeFalso();
+  const a = EstDadosCriar({ store: storeX, local, core: C, agora, id: novoId, escopo: 'gh:dono/repoX' }); await a.carregar();
+  storeX.falhar = true; await a.salvarSessao(sessao());          // ficou só na cópia local do repoX
+  const b = EstDadosCriar({ store: storeY, local, core: C, agora, id: novoId, escopo: 'gh:dono/repoY' }); await b.carregar();
+  assert.equal(b.todas('sessoes').length, 0);
+  await b.sincronizar();
+  assert.equal(storeY.map.has('est:sessoes-2026-11'), false);
+});
+
+test('auditoria: cópia local antiga (sem escopo) continua valendo para o armazenamento principal', async () => {
+  const local = localFalso(), store = storeFalso();
+  const s = sessao();
+  local.map.set('estlocal:est:indice', { versao: 1, registros: { 'sessoes-2026-11': { id: 'sessoes-2026-11', tipo: 'sessoes', mes: '2026-11' } } });
+  local.map.set('estlocal:est:sessoes-2026-11', { versao: 1, registros: { [s.id]: s } });
+  const a = EstDadosCriar({ store, local, core: C, agora, id: novoId, escopo: 'gh:Flips794/mapa-mental-dados', jornalLegado: true }); await a.carregar();
+  assert.deepEqual(a.todas('sessoes').map(x => x.id), [s.id]);
+  await a.sincronizar();
+  assert.ok(store.map.get('est:sessoes-2026-11').registros[s.id]);
+});
