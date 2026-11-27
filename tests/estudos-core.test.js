@@ -420,3 +420,18 @@ test('pontos fracos juntam domínio crítico, retomada, retenção e erros', () 
   assert.deepEqual(pf.map(p => p.item.id), ['a', 'b']);
   assert.ok(pf[1].motivos.some(m => /erros/i.test(m)));
 });
+
+test('validarAjustes: padrões são válidos; valores que quebram os cálculos são apontados', () => {
+  const pad = JSON.parse(JSON.stringify(C.AJUSTES_PADRAO));
+  assert.deepEqual(C.validarAjustes(pad), []);
+  const ruim = (mud) => C.validarAjustes(Object.assign(JSON.parse(JSON.stringify(pad)), mud));
+  assert.deepEqual(ruim({ meiaVidaDias: 0 }), ['meiaVidaDias']);
+  assert.deepEqual(ruim({ fatorDificil: 0 }), ['fatorDificil']);
+  assert.deepEqual(ruim({ fatorDificil: 1.5 }), ['fatorDificil']);
+  assert.deepEqual(ruim({ escada: [1, 7, 7] }), ['escada']);
+  assert.deepEqual(ruim({ limiarBom: 0.5, limiarBaixo: 0.6 }).sort(), ['limiarBaixo', 'limiarBom']);
+  assert.deepEqual(ruim({ categorias: { excelente: 90, bom: 95, regular: 60 } }).sort(), ['categorias.bom', 'categorias.excelente', 'categorias.regular']);
+  assert.deepEqual(ruim({ pesoDominioQuestoes: 0, pesoDominioExplicacao: 0 }).sort(), ['pesoDominioExplicacao', 'pesoDominioQuestoes']);
+  assert.deepEqual(ruim({ refQuestoes: 0 }), ['refQuestoes']);
+  assert.deepEqual(ruim({ recorrenteN: 0 }), ['recorrenteN']);
+});

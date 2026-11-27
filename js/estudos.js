@@ -950,12 +950,8 @@ EST_VIEWS.ajustes = function(body){
   body.querySelector('#ajOk').onclick = async () => {
     const novo = {}; const ruins = [];
     body.querySelectorAll('input[data-cam]').forEach(i => { i.classList.remove('err'); const v = ajInterpretar(i.value, i.dataset.tipo); if (v === undefined){ ruins.push(i); i.classList.add('err'); } else ajGravar(novo, i.dataset.cam, v); });
-    if (!ruins.length){
-      const c = novo.categorias; if (!(c.excelente > c.bom && c.bom > c.regular)) ruins.push(...body.querySelectorAll('input[data-cam^="categorias."]'));
-      if (!(novo.limiarBom > novo.limiarBaixo)) ruins.push(body.querySelector('input[data-cam="limiarBom"]'), body.querySelector('input[data-cam="limiarBaixo"]'));
-      ruins.forEach(i => i.classList.add('err'));
-    }
-    if (ruins.length){ msg.textContent = 'Confira os campos destacados (números válidos; categorias em ordem decrescente; resultado bom acima do baixo; escada em ordem crescente).'; msg.className = 'est-msg err'; return; }
+    if (!ruins.length) for (const cam of EC.validarAjustes(novo)){ const i = body.querySelector('input[data-cam="' + cam + '"]'); if (i){ i.classList.add('err'); ruins.push(i); } }
+    if (ruins.length){ msg.textContent = 'Confira os campos destacados: números válidos, escada em ordem crescente, categorias em ordem decrescente, resultado bom acima do baixo, fator entre 0 e 1, meia-vida de pelo menos 1 dia e pesos que não sejam todos zero.'; msg.className = 'est-msg err'; return; }
     await ED.salvarAjustes(novo); toast('Ajustes salvos'); estRender();
   };
   body.querySelector('#ajRest').onclick = async () => {

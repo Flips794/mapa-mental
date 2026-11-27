@@ -453,8 +453,36 @@ function pontosFracos(itens, estados, estatErros){
   return out.sort((a, b) => b.peso - a.peso);
 }
 
+/* ---------- Ajustes: valores que quebrariam os cálculos ---------- */
+function validarAjustes(a){
+  const ruins = new Set();
+  const num = (v) => typeof v === 'number' && isFinite(v);
+  const exigir = (cam, ok) => { if (!ok) ruins.add(cam); };
+  const e = a.escada;
+  exigir('escada', Array.isArray(e) && e.length > 0 && e.every((n, i) => Number.isInteger(n) && n > 0 && (!i || n > e[i - 1])));
+  exigir('degrauExtra', Number.isInteger(a.degrauExtra) && a.degrauExtra >= 1);
+  exigir('fatorDificil', num(a.fatorDificil) && a.fatorDificil > 0 && a.fatorDificil <= 1);
+  const lim = (v) => num(v) && v > 0 && v <= 1;
+  exigir('limiarBom', lim(a.limiarBom)); exigir('limiarBaixo', lim(a.limiarBaixo));
+  if (lim(a.limiarBom) && lim(a.limiarBaixo) && !(a.limiarBom > a.limiarBaixo)){ ruins.add('limiarBom'); ruins.add('limiarBaixo'); }
+  const p100 = (v) => num(v) && v >= 0 && v <= 100;
+  exigir('dominioConsolidado', p100(a.dominioConsolidado)); exigir('dominioEsquecimento', p100(a.dominioEsquecimento));
+  const c = a.categorias || {};
+  if (!(p100(c.excelente) && p100(c.bom) && p100(c.regular) && c.excelente > c.bom && c.bom > c.regular)) ['excelente', 'bom', 'regular'].forEach(k => ruins.add('categorias.' + k));
+  const inteiro = (cam, v, min) => exigir(cam, Number.isInteger(v) && v >= min);
+  inteiro('recorrenteN', a.recorrenteN, 1); inteiro('minQuestoes', a.minQuestoes, 0); inteiro('minAvaliadas', a.minAvaliadas, 1);
+  inteiro('minRevisoesRetencao', a.minRevisoesRetencao, 1); inteiro('refQuestoes', a.refQuestoes, 1);
+  exigir('meiaVidaDias', num(a.meiaVidaDias) && a.meiaVidaDias >= 1);
+  exigir('alertaCronometroHoras', num(a.alertaCronometroHoras) && a.alertaCronometroHoras > 0);
+  const pesos = (cams) => { const vs = cams.map(k => a[k]); cams.forEach((k, i) => exigir(k, num(vs[i]) && vs[i] >= 0)); if (vs.every(num) && vs.every(v => v >= 0) && vs.reduce((t, v) => t + v, 0) <= 0) cams.forEach(k => ruins.add(k)); };
+  pesos(['pesoDominioQuestoes', 'pesoDominioExplicacao']); pesos(['pesoQuestoes', 'pesoExplicacao', 'pesoPercebida']);
+  for (const [grupo, ks] of [['notaExplicacao', ['completo', 'pouco', 'muito']], ['percebidaValor', ['facil', 'ok', 'dificil']]]) for (const k of ks) exigir(grupo + '.' + k, num((a[grupo] || {})[k]) && a[grupo][k] >= 0 && a[grupo][k] <= 1);
+  for (const k of ['dificil', 'facil']) exigir('ajustePercebida.' + k, num((a.ajustePercebida || {})[k]));
+  return [...ruins];
+}
+
 const api = {
-  AJUSTES_PADRAO,
+  AJUSTES_PADRAO, validarAjustes,
   unicos, resumoDia, serieDiaria, porAssunto, porMateria, evolucaoMensal, tempoMedioPorQuestao, produtividade,
   planoStatus, realizadoDoPlano, resumoSemana, reagendarPlano,
   MOTIVOS_ERRO, estatisticasErros, CRITERIOS_PADRAO, validarSimulado, notaSimulado, evolucaoSimulados, pontosFracos,
