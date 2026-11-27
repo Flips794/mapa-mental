@@ -385,6 +385,21 @@ html[data-theme=dark] .ai-preview.ok{color:#4ade80}
 .ai-preview.err{color:var(--danger)}
 .btn-s:disabled{opacity:.45;cursor:default}
 
+/* janela "Conectar ao GitHub" */
+.gh-box{width:min(520px,100%)}
+.gh-form{display:flex;flex-direction:column;gap:12px;padding:6px 18px 18px}
+.gh-form label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;font-weight:600;color:var(--ink)}
+.gh-form input{height:36px;border:1px solid var(--line);border-radius:8px;padding:0 11px;font:inherit;font-weight:400;font-size:13px;background:var(--surface);color:var(--ink);outline:0}
+.gh-form input:focus{border-color:var(--ring);box-shadow:0 0 0 3px rgba(59,130,246,.15)}
+.gh-help{font-size:12.5px;color:var(--muted);line-height:1.6}
+.gh-help summary{cursor:pointer;color:var(--anchor);font-weight:600}
+.gh-help ol{margin:8px 0;padding-left:20px}
+.gh-help a{color:var(--anchor)}
+.gh-msg{font-size:12.5px;min-height:17px;color:var(--muted)}
+.gh-msg.err{color:var(--danger)}
+.gh-form .row{display:flex;gap:8px;justify-content:flex-end}
+.gh-form .btn-s{height:34px;padding:0 14px;font-size:13px}
+
 /* aviso da versão online (GitHub Pages) */
 .online-banner{flex:0 0 auto;display:block;position:relative;padding:7px 40px 7px 14px;line-height:1.45;font-size:12.5px;background:#fef3c7;color:#78350f;border-bottom:1px solid #fcd34d}
 .online-banner a{color:#92400e;font-weight:700}

@@ -94,7 +94,7 @@ async function renameItem(it){
     // só o nome do mapa muda; o texto das árvores fica como está
     if(it.id===curMapId){ M.title=t; await saveNow(); }
     else { const d=await Store.get('map:'+it.id); if(d&&(d.root||d.trees)){ const n=normalizeMap(d); await Store.set('map:'+it.id,{version:3,title:t,trees:n.trees,files:n.files}); } it.title=t; await wsSave(); }
-    if(Store.mode==='server'){ const d=it.id===curMapId?M:normalizeMap(await Store.get('map:'+it.id)); Store.setText(it.id,t,mapToText(d).text); }
+    if(Store.remote){ const d=it.id===curMapId?M:normalizeMap(await Store.get('map:'+it.id)); Store.setText(it.id,t,mapToText(d).text); }
   } else {
     if(it.id===curDocId){ docTitleEl.value=t; await docSaveNow(); }
     else { const d=await Store.get('doc:'+it.id); if(d){ d.title=t; await Store.set('doc:'+it.id,d); } it.title=t; await wsSave(); }
@@ -118,6 +118,7 @@ async function duplicateItem(it){
 async function deleteItem(it){
   if(!confirm('Excluir "'+(it.title||'Sem título')+'"? Isso não pode ser desfeito.')) return;
   ws.items.splice(ws.items.indexOf(it),1);
+  ws.deletedIds=(ws.deletedIds||[]).concat(it.id).slice(-500);   // outros aparelhos não trazem de volta
   if(it.type==='map'){
     if(it.id===curMapId){ clearTimeout(saveTimer); saveTimer=null; M=null; curMapId=null; }
     await Store.del('map:'+it.id);
@@ -141,9 +142,17 @@ async function deleteItem(it){
 /* ---------- Inicialização (com migração das versões anteriores) ---------- */
 (async function init(){
   await Store.ready;
-  if(/github\.io$/i.test(location.hostname)) showOnlineBanner();
+  if(Store.mode==='local' && /github\.io$/i.test(location.hostname)) showOnlineBanner();
+  if(Store.mode==='github'){
+    try{ await mergeLocalIntoGithub(); }
+    catch(err){ if(err && err.auth){ githubAuthProblem(); return; } }
+  }
   try{ ws=await Store.get('ws'); }
-  catch(err){ fatal('Não foi possível ler os dados do servidor local. Verifique se ele está rodando e recarregue a página.'); return; }
+  catch(err){
+    if(err && err.auth){ githubAuthProblem(); return; }
+    fatal(Store.mode==='github' ? 'Não foi possível ler seus mapas no GitHub. Verifique a internet e recarregue a página.' : 'Não foi possível ler os dados do servidor local. Verifique se ele está rodando e recarregue a página.');
+    return;
+  }
   if(!ws || !Array.isArray(ws.items)){
     const legacy=await Store.get('doc');            // mapa único das versões anteriores
     const id=genId();
@@ -170,11 +179,24 @@ async function deleteItem(it){
     if(t) await docOpen(t.id); else updateDocEmpty();
   } else updateDocEmpty();
   renderSidebar();
-  setStatus(Store.mode==='server' ? 'Pronto ✓' : 'Pronto (só neste navegador)');
-  $('#status').title = Store.mode==='server'
-    ? 'Tudo é salvo no servidor local (pasta dados/ do projeto) — igual em qualquer navegador deste computador'
-    : 'Os dados ficam só neste navegador';
-  if(Store.mode==='server'){
+  const gh=Store.github;
+  setStatus({server:'Pronto ✓', github:'GitHub ✓', local:'Pronto (só neste navegador)'}[Store.mode]);
+  $('#status').title = {
+    server:'Tudo é salvo no servidor local (pasta dados/ do projeto) — igual em qualquer navegador deste computador',
+    github: gh ? 'Tudo é salvo no repositório privado '+gh.cfg.owner+'/'+gh.cfg.repo+' — igual em qualquer aparelho. Clique para opções.' : '',
+    local:'Os dados ficam só neste navegador'}[Store.mode];
+  if(Store.mode==='github'){
+    $('#status').style.cursor='pointer';
+    $('#status').addEventListener('click',e=>{
+      const r=e.currentTarget.getBoundingClientRect();
+      showMenu(r.right-220, r.bottom+4, [
+        {label:'↗  Abrir o repositório no GitHub', fn:()=>window.open('https://github.com/'+gh.cfg.owner+'/'+gh.cfg.repo,'_blank','noopener')},
+        {label:'⏏  Desconectar este aparelho', danger:true, fn:()=>{ if(confirm('Desconectar este aparelho do GitHub? Seus mapas continuam no repositório; aqui será pedida a chave de novo.')) githubDisconnect(); }},
+      ]);
+    });
+    window.addEventListener('beforeunload',e=>{ if(Store.busy() || saveTimer || docSaveTimer){ e.preventDefault(); e.returnValue=''; } });
+  }
+  if(Store.remote){
     buildMissingMirrors();
     window.addEventListener('focus',syncFromServer);
     document.addEventListener('visibilitychange',()=>{ if(!document.hidden) syncFromServer(); });
@@ -190,10 +212,46 @@ function fatal(msg){
 }
 
 /* ---------- Aviso na versão do GitHub ---------- */
+/* ---------- GitHub: mapas que só existem neste navegador sobem para o repositório (nada é sobrescrito) ---------- */
+async function mergeLocalIntoGithub(){
+  const gh=Store.github, flag='mm-gh-merged:'+gh.cfg.owner+'/'+gh.cfg.repo;
+  if(localStorage.getItem(flag)) return;
+  const localWs=await Store.local.get('ws');
+  const localItems=(localWs && Array.isArray(localWs.items)) ? localWs.items.filter(i=>i && /^[A-Za-z0-9_-]{1,80}$/.test(i.id) && (i.type==='map'||i.type==='doc')) : [];
+  if(!localItems.length){ localStorage.setItem(flag,'1'); return; }
+  const remoteWs=await Store.get('ws');
+  const have=new Set(remoteWs && Array.isArray(remoteWs.items) ? remoteWs.items.map(i=>i.id) : []);
+  const toAdd=localItems.filter(i=>!have.has(i.id));
+  if(toAdd.length){
+    setStatus('Enviando '+toAdd.length+' item(ns) deste navegador para o GitHub…');
+    const added=[];
+    for(const it of toAdd){
+      const k=(it.type==='map'?'map:':'doc:')+it.id, data=await Store.local.get(k);
+      if(!data) continue;
+      if(it.type==='doc') for(const p of (it.pdfs||[])){ const b=await Store.local.get('pdf:'+p); if(b) await Store.set('pdf:'+p,b); }
+      if(await Store.set(k,data)) added.push(it);
+    }
+    const merged = remoteWs && Array.isArray(remoteWs.items) ? remoteWs : {version:3, mode:'map', items:[], current:{}};
+    merged.items=merged.items.concat(added);
+    if(!merged.current || !merged.current.map) merged.current=Object.assign({}, merged.current, localWs.current||{});
+    if(!await Store.set('ws',merged)) return;   // tenta de novo na próxima abertura
+    toast(added.length+' item(ns) deste navegador enviados para o GitHub');
+  }
+  localStorage.setItem(flag,'1');
+}
+function githubAuthProblem(){
+  setStatus('⚠ Chave do GitHub');
+  const d=document.createElement('div'); d.className='modal';
+  d.innerHTML='<div class="modal-box" style="padding:22px;max-width:460px"><b style="font-size:15px">⚠ A chave do GitHub não funcionou</b><p style="color:var(--muted);line-height:1.55">Ela pode ter vencido ou sido apagada. Seus mapas continuam no repositório — é só conectar de novo com uma chave nova.</p><button class="btn-s primary" id="ghRe">Conectar de novo</button></div>';
+  document.body.appendChild(d);
+  d.querySelector('#ghRe').onclick=githubDisconnect;
+}
+
 function showOnlineBanner(){
   if(sessionStorage.getItem('mm-banner-off')) return;
   const b=document.createElement('div'); b.className='online-banner';
-  b.innerHTML='Versão online de demonstração: aqui os dados ficam <b>só neste navegador</b>. Seus mapas ficam no endereço do seu computador: <a href="http://localhost:4580">http://localhost:4580</a> · para levar o que está aqui: Exportar → Tudo e depois Importar lá. <button title="Fechar">✕</button>';
+  b.innerHTML='Modo só neste navegador: os mapas daqui não aparecem em outros aparelhos. <a href="#" id="ghConnectLink">Conectar ao GitHub</a> para guardar tudo online no seu repositório privado. <button title="Fechar">✕</button>';
+  b.querySelector('#ghConnectLink').onclick=e=>{ e.preventDefault(); sessionStorage.removeItem('mm-local-only'); location.reload(); };
   b.querySelector('button').onclick=()=>{ b.remove(); sessionStorage.setItem('mm-banner-off','1'); };
   document.body.insertBefore(b,document.body.firstChild);
 }
@@ -209,7 +267,7 @@ async function buildMissingMirrors(){
 /* ---------- Voltar para a janela: pega o que outro navegador salvou ---------- */
 let syncing=false;
 async function syncFromServer(){
-  if(syncing || Store.mode!=='server' || document.hidden || !ws) return;
+  if(syncing || !Store.remote || document.hidden || !ws) return;
   if(saveTimer || docSaveTimer || editingId || textTimer) return;
   const a=document.activeElement;
   if(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))) return;

@@ -2,10 +2,30 @@
 
 Mapas mentais e documentos **100% no navegador**. Sem login, sem servidor, sem mensalidade: tudo fica salvo no seu computador.
 
-🏠 **Seu endereço:** http://localhost:4580 — servidor neste computador; os dados ficam na pasta `dados/` e são os mesmos em qualquer navegador.
-🌐 **Demonstração online:** https://flips794.github.io/mapa-mental/ (lá os dados ficam só no navegador).
+🌐 **Endereço principal:** https://flips794.github.io/mapa-mental/
+Os mapas, documentos e PDFs ficam no repositório **privado** [`Flips794/mapa-mental-dados`](https://github.com/Flips794/mapa-mental-dados) — online e iguais em qualquer aparelho.
 
-## 🖥️ Servidor local (armazenamento único)
+## ☁️ Dados no GitHub
+
+Na primeira vez em cada aparelho, o site pede uma **chave de acesso** (token) com permissão só para o repositório de dados:
+
+1. Abra https://github.com/settings/personal-access-tokens/new
+2. **Repository access** → *Only select repositories* → `mapa-mental-dados`
+3. **Permissions → Repository permissions → Contents** → *Read and write*
+4. **Generate token**, copie e cole no site.
+
+A chave fica guardada só naquele navegador. Clique no status (canto superior direito, "GitHub ✓") para abrir o repositório ou desconectar o aparelho.
+
+No repositório de dados:
+
+| Pasta | Conteúdo |
+|---|---|
+| `ws.json` | lista de mapas e documentos |
+| `mapas/`, `documentos/`, `pdfs/` | cada mapa, documento e PDF |
+| `texto/` | cópia legível `.md` de cada mapa |
+| `lixeira/` | o que foi excluído (e todo salvamento também fica no histórico do repositório) |
+
+## 🖥️ Servidor local (opcional, sem internet)
 
 ```bash
 bash server/instalar-servico.sh     # instala e liga (inicia sozinho ao entrar no computador)

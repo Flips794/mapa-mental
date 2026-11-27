@@ -13,11 +13,16 @@ function textToHtml(s){ return esc(s||'').replace(/\n/g,'<br>'); }
 function fmtSize(b){ if(!b) return ''; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
 /* ---------- Armazenamento chave/valor ----------
-   Aberto pelo servidor local (http://localhost:4580): tudo fica nos arquivos do servidor,
-   igual em qualquer navegador. Aberto de outro jeito (GitHub Pages, arquivo): IndexedDB do navegador. */
+   1) Aberto pelo servidor local (http://localhost:4580): arquivos do servidor.
+   2) Conectado a um repositório do GitHub: tudo fica no repositório privado (online, igual em qualquer aparelho).
+   3) Sem nenhum dos dois: IndexedDB deste navegador. */
+const GH_CFG_KEY='mm-github';
+const GH_DEFAULT_REPO='Flips794/mapa-mental-dados';
+function ghConfig(){ try{ const c=JSON.parse(localStorage.getItem(GH_CFG_KEY)||'null'); return c && c.owner && c.repo && c.token ? c : null; }catch(e){ return null; } }
+
 const Store = (()=>{
   const local = LocalStore();
-  let mode=null;   // 'server' | 'local'
+  let mode=null, gh=null;   // mode: 'server' | 'github' | 'local'
   const ready=(async()=>{
     if(/^https?:$/.test(location.protocol) && !/github\.io$/i.test(location.hostname)){
       try{
@@ -25,6 +30,9 @@ const Store = (()=>{
         if(r.ok){ const j=await r.json(); if(j && j.app==='mapa-mental'){ mode='server'; return; } }
       }catch(e){}
     }
+    let cfg=ghConfig();
+    if(!cfg && /github\.io$/i.test(location.hostname) && sessionStorage.getItem('mm-local-only')!=='1') cfg=await githubSetupDialog();
+    if(cfg){ gh=GitHubStore(cfg); mode='github'; return; }
     mode='local';
   })();
   const H={'X-Mapa-Mental':'1'};
@@ -32,9 +40,12 @@ const Store = (()=>{
   return {
     ready,
     get mode(){ return mode; },
-    /* no modo servidor, erro de rede LANÇA exceção (nunca finge que está vazio) */
+    get remote(){ return mode==='server' || mode==='github'; },
+    get github(){ return gh; },
+    /* modo servidor/GitHub: erro de rede LANÇA exceção (nunca finge que está vazio) */
     async get(k){
       await ready;
+      if(mode==='github') return gh.get(k);
       if(mode!=='server') return local.get(k);
       const r=await fetch(url(k),{cache:'no-store'});
       if(r.status===404) return undefined;
@@ -43,6 +54,7 @@ const Store = (()=>{
     },
     async set(k,v){
       await ready;
+      if(mode==='github') return gh.set(k,v);
       if(mode!=='server') return local.set(k,v);
       const bin=v instanceof ArrayBuffer;
       const body=bin?v:JSON.stringify(v);
@@ -53,21 +65,227 @@ const Store = (()=>{
     },
     async del(k){
       await ready;
+      if(mode==='github') return gh.del(k);
       if(mode!=='server') return local.del(k);
       try{ await fetch(url(k),{method:'DELETE',headers:H}); }catch(e){}
     },
-    /* cópia legível do mapa em dados/texto/ */
+    /* cópia legível do mapa (texto/) */
     async setText(id,title,text){
-      await ready; if(mode!=='server') return;
+      await ready;
+      if(mode==='github') return gh.setText(id,title,text);
+      if(mode!=='server') return;
       try{ await fetch('api/md/'+encodeURIComponent(id),{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify({title,text})}); }catch(e){}
     },
     async textIds(){
-      await ready; if(mode!=='server') return [];
+      await ready;
+      if(mode==='github') return gh.textIds();
+      if(mode!=='server') return [];
       try{ const r=await fetch('api/md',{cache:'no-store'}); return r.ok ? (await r.json()).ids||[] : []; }catch(e){ return []; }
     },
+    /* espera os envios pendentes (GitHub) */
+    busy(){ return mode==='github' && gh.busy(); },
+    /* intervalo mínimo entre salvamentos: no GitHub cada salvamento vira um registro no histórico */
+    delay(ms){ return mode==='github' ? Math.max(ms,2500) : ms; },
     local
   };
 })();
+
+/* ---------- Repositório do GitHub como armazenamento ---------- */
+function bytesToB64(u8){ let s=''; for(let i=0;i<u8.length;i+=0x8000) s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return btoa(s); }
+function b64ToBytes(b){ const s=atob(b); const u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u; }
+function GitHubStore(cfg){
+  const api=(localStorage.getItem('mm-github-api')||'https://api.github.com').replace(/\/$/,'');
+  const branch=localStorage.getItem('mm-github-branch')||'';
+  const base=api+'/repos/'+encodeURIComponent(cfg.owner)+'/'+encodeURIComponent(cfg.repo)+'/contents/';
+  const shas=new Map();
+  const ID=/^[A-Za-z0-9_-]{1,80}$/;
+  const encPath=p=>p.split('/').map(encodeURIComponent).join('/');
+  function pathOf(k){
+    if(k==='ws') return 'ws.json';
+    const m=/^(map|doc|pdf):(.+)$/.exec(k);
+    if(m && ID.test(m[2])) return ({map:'mapas',doc:'documentos',pdf:'pdfs'})[m[1]]+'/'+m[2]+(m[1]==='pdf'?'.pdf':'.json');
+    if(ID.test(k)) return 'outros/'+k+'.json';
+    throw new Error('chave inválida: '+k);
+  }
+  async function req(method,path,body,accept){
+    const h={'Authorization':'Bearer '+cfg.token,'Accept':accept||'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
+    if(body) h['Content-Type']='application/json';
+    const q = (method==='GET' && branch) ? '?ref='+encodeURIComponent(branch) : '';
+    const r=await fetch(base+encPath(path)+q,{method,headers:h,body:body?JSON.stringify(body):undefined,cache:'no-store'});
+    if(r.status===401) throw Object.assign(new Error('Chave do GitHub inválida ou vencida'),{auth:true});
+    return r;
+  }
+  async function readBytes(path){
+    const r=await req('GET',path);
+    if(r.status===404){ shas.set(path,null); return undefined; }
+    if(!r.ok) throw new Error('GitHub respondeu '+r.status);
+    const j=await r.json();
+    if(Array.isArray(j)) throw new Error(path+' é uma pasta');
+    shas.set(path,j.sha);
+    if(j.encoding==='base64' && j.content) return b64ToBytes(j.content.replace(/\s/g,''));
+    // arquivos acima de 1 MB vêm separados
+    const r2=await req('GET',path,null,'application/vnd.github.raw+json');
+    if(!r2.ok) throw new Error('GitHub respondeu '+r2.status);
+    return new Uint8Array(await r2.arrayBuffer());
+  }
+  async function listDir(dir){
+    const r=await req('GET',dir);
+    if(r.status===404) return [];
+    if(!r.ok) throw new Error('GitHub respondeu '+r.status);
+    const j=await r.json(); return Array.isArray(j) ? j : [];
+  }
+  async function putBytes(path,bytes,msg,retry){
+    if(!shas.has(path)){
+      const r=await req('GET',path);
+      if(r.ok){ const j=await r.json(); shas.set(path, Array.isArray(j)?null:j.sha); }
+      else if(r.status===404) shas.set(path,null);
+      else return false;
+    }
+    const body={message:msg, content:bytesToB64(bytes)};
+    const sha=shas.get(path); if(sha) body.sha=sha;
+    if(branch) body.branch=branch;
+    const r=await req('PUT',path,body);
+    if(r.ok){ const j=await r.json(); shas.set(path,j.content.sha); return true; }
+    if((r.status===409 || r.status===422) && retry!==false){ shas.delete(path); return putBytes(path,bytes,msg,false); }
+    return false;
+  }
+  async function deletePath(path,msg){
+    if(!shas.get(path)){ const r=await req('GET',path); if(!r.ok) return r.status===404; const j=await r.json(); shas.set(path,j.sha); }
+    const body={message:msg, sha:shas.get(path)}; if(branch) body.branch=branch;
+    const r=await req('DELETE',path,body);
+    if(r.ok || r.status===404){ shas.set(path,null); return true; }
+    return false;
+  }
+  /* fila única: um envio por vez (evita conflito no histórico); vários salvamentos do mesmo arquivo viram um só */
+  let chain=Promise.resolve(), inflight=0;
+  const pending=new Map();
+  function enqueue(key,fn){
+    if(key && pending.has(key)){ const p=pending.get(key); p.fn=fn; return p.promise; }
+    let resolve; const promise=new Promise(r=>resolve=r);
+    const job={fn,promise}; if(key) pending.set(key,job);
+    inflight++;
+    chain=chain.then(async()=>{
+      if(key) pending.delete(key);
+      try{ resolve(await job.fn()); }catch(e){ console.error(e); resolve(false); }
+      finally{ inflight--; }
+    });
+    return promise;
+  }
+  const enc=new TextEncoder(), dec=new TextDecoder();
+  const label=k=> k==='ws' ? 'lista de arquivos' : k.replace(':',' ');
+  return {
+    async get(k){
+      const bytes=await readBytes(pathOf(k));
+      if(bytes===undefined) return undefined;
+      if(/^pdf:/.test(k)) return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset+bytes.byteLength);
+      return JSON.parse(dec.decode(bytes));
+    },
+    set(k,v){
+      const path=pathOf(k);
+      return enqueue(path, async()=>{
+        if(k==='ws' && v && Array.isArray(v.items)){
+          // outro aparelho pode ter criado itens: junta as listas (respeitando o que foi excluído)
+          try{
+            const cur=await readBytes(path);
+            if(cur){
+              const remote=JSON.parse(dec.decode(cur));
+              if(remote && Array.isArray(remote.items)){
+                const dead=new Set([...(remote.deletedIds||[]),...(v.deletedIds||[])]);
+                const ids=new Set(v.items.map(i=>i.id));
+                remote.items.forEach(it=>{ if(it && !ids.has(it.id) && !dead.has(it.id)) v.items.push(it); });
+                v.items=v.items.filter(i=>!dead.has(i.id));
+                v.deletedIds=[...dead].slice(-500);
+              }
+            }
+          }catch(e){ if(e.auth) throw e; }
+        }
+        const bytes = v instanceof ArrayBuffer ? new Uint8Array(v) : enc.encode(JSON.stringify(v));
+        return putBytes(path,bytes,'Salva '+label(k));
+      });
+    },
+    del(k){
+      const path=pathOf(k);
+      return enqueue(null, async()=>{
+        // vai para a lixeira/ e só então sai do lugar original
+        const bytes=await readBytes(path).catch(()=>undefined);
+        if(bytes!==undefined){
+          const stamp=new Date().toISOString().replace(/[:.]/g,'-');
+          await putBytes('lixeira/'+stamp+'__'+path.replace('/','_'),bytes,'Lixeira: '+label(k));
+          await deletePath(path,'Exclui '+label(k));
+        }
+        return true;
+      });
+    },
+    setText(id,title,text){
+      if(!ID.test(id)) return Promise.resolve(false);
+      return enqueue('texto:'+id, async()=>{
+        const safe=String(title||'').replace(/[\\/:*?"<>|\u0000-\u001f]+/g,' ').replace(/\s+/g,' ').trim().slice(0,90)||'Sem título';
+        const name='texto/'+safe+' ('+id+').md';
+        const files=await listDir('texto');
+        for(const f of files){ if(f.name.endsWith(' ('+id+').md') && f.path!==name){ shas.set(f.path,f.sha); await deletePath(f.path,'Renomeia texto de '+id); } }
+        const f=files.find(x=>x.path===name); if(f) shas.set(name,f.sha);
+        return putBytes(name,enc.encode(String(text)),'Texto de '+safe);
+      });
+    },
+    async textIds(){
+      const files=await listDir('texto').catch(()=>[]);
+      return files.map(f=>(/ \(([A-Za-z0-9_-]+)\)\.md$/.exec(f.name)||[])[1]).filter(Boolean);
+    },
+    busy(){ return inflight>0; },
+    cfg
+  };
+}
+
+/* ---------- Janela "Conectar ao GitHub" ---------- */
+function githubSetupDialog(){
+  return new Promise(resolve=>{
+    const d=document.createElement('div'); d.className='modal'; d.id='ghSetup';
+    d.innerHTML=`<div class="modal-box gh-box">
+      <div class="modal-head"><b>☁️ Guardar seus mapas no GitHub</b></div>
+      <div class="modal-sub">Os mapas ficam no seu repositório <b>privado</b> e aparecem iguais em qualquer aparelho. Em cada aparelho novo, cole a chave uma única vez.</div>
+      <div class="gh-form">
+        <label>Repositório <input id="ghRepo" autocomplete="off" spellcheck="false"></label>
+        <label>Chave de acesso (token) <input id="ghToken" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
+        <details class="gh-help"><summary>Como criar a chave (2 minutos)</summary>
+          <ol>
+            <li>Abra <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener noreferrer">github.com/settings/personal-access-tokens/new</a></li>
+            <li><b>Token name</b>: Mapa Mental · <b>Expiration</b>: a validade que preferir</li>
+            <li><b>Repository access</b>: <i>Only select repositories</i> → escolha <b>mapa-mental-dados</b></li>
+            <li><b>Permissions</b> → <b>Repository permissions</b> → <b>Contents</b>: <i>Read and write</i></li>
+            <li>Clique em <b>Generate token</b>, copie e cole aqui.</li>
+          </ol>
+          A chave fica guardada só neste navegador e dá acesso apenas a esse repositório.
+        </details>
+        <div class="gh-msg" id="ghMsg"></div>
+        <div class="row"><button class="btn-s" id="ghLocal">Usar só neste navegador</button><button class="btn-s primary" id="ghOk">Conectar</button></div>
+      </div></div>`;
+    document.body.appendChild(d);
+    const repo=d.querySelector('#ghRepo'), tok=d.querySelector('#ghToken'), msg=d.querySelector('#ghMsg');
+    repo.value=GH_DEFAULT_REPO; setTimeout(()=>tok.focus(),50);
+    d.querySelector('#ghLocal').onclick=()=>{ sessionStorage.setItem('mm-local-only','1'); d.remove(); resolve(null); };
+    const go=async()=>{
+      const [owner,name]=repo.value.trim().replace(/^https?:\/\/github\.com\//i,'').replace(/\.git$/,'').split('/');
+      const token=tok.value.trim();
+      if(!owner || !name || !token){ msg.textContent='Preencha o repositório (dono/nome) e a chave.'; return; }
+      msg.textContent='Verificando…'; msg.className='gh-msg';
+      try{
+        const api=(localStorage.getItem('mm-github-api')||'https://api.github.com').replace(/\/$/,'');
+        const r=await fetch(api+'/repos/'+encodeURIComponent(owner)+'/'+encodeURIComponent(name),{headers:{'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json'},cache:'no-store'});
+        if(r.status===401){ msg.textContent='Chave inválida ou vencida.'; msg.className='gh-msg err'; return; }
+        if(r.status===404){ msg.textContent='Repositório não encontrado (ou a chave não tem acesso a ele).'; msg.className='gh-msg err'; return; }
+        if(!r.ok){ msg.textContent='O GitHub respondeu '+r.status+'. Tente de novo.'; msg.className='gh-msg err'; return; }
+        const j=await r.json();
+        if(j.permissions && j.permissions.push===false){ msg.textContent='A chave só permite leitura. Marque Contents: Read and write.'; msg.className='gh-msg err'; return; }
+        const cfg={owner,repo:name,token};
+        localStorage.setItem(GH_CFG_KEY,JSON.stringify(cfg));
+        d.remove(); resolve(cfg);
+      }catch(e){ msg.textContent='Sem conexão com o GitHub. Verifique a internet.'; msg.className='gh-msg err'; }
+    };
+    d.querySelector('#ghOk').onclick=go;
+    tok.addEventListener('keydown',e=>{ if(e.key==='Enter') go(); });
+  });
+}
+function githubDisconnect(){ localStorage.removeItem(GH_CFG_KEY); sessionStorage.removeItem('mm-local-only'); location.reload(); }
 
 function LocalStore(){
   const DB='mapa_mental_db', ST='kv'; let dbP=null;
@@ -201,7 +419,7 @@ function showLightbox(src){ const lb=$('#lightbox'); lb.querySelector('img').src
 $('#lightbox').addEventListener('click',()=>{ $('#lightbox').style.display='none'; });
 function download(a){ const l=document.createElement('a'); l.href=a.dataUrl; l.download=a.name; document.body.appendChild(l); l.click(); l.remove(); }
 function setStatus(t){ $('#status').textContent=t; }
-function savedStatus(ok){ const t=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); setStatus(ok?('Salvo ✓ '+t+(Store.mode==='server'?'':' (só neste navegador)')):(Store.mode==='server'?'⚠ Servidor fora do ar — não salvou':'⚠ Falha ao salvar')); }
+function savedStatus(ok){ const t=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); const where={github:' no GitHub',server:'',local:' (só neste navegador)'}[Store.mode]||''; setStatus(ok?('Salvo'+where+' ✓ '+t):({github:'⚠ Não salvou no GitHub — verifique a internet',server:'⚠ Servidor fora do ar — não salvou'}[Store.mode]||'⚠ Falha ao salvar')); }
 
 /* menu flutuante simples: items = [{label, danger, fn}] */
 let openMenuEl=null;

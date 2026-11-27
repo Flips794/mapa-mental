@@ -203,7 +203,7 @@ function docSerialize(){
   });
   return {title:docTitleEl.value.trim()||'Documento sem título', pages};
 }
-function docSaveSoon(){ if(!D) return; setStatus('Salvando…'); clearTimeout(docSaveTimer); docSaveTimer=setTimeout(docSaveNow,600); }
+function docSaveSoon(){ if(!D) return; setStatus('Salvando…'); clearTimeout(docSaveTimer); docSaveTimer=setTimeout(docSaveNow,Store.delay(600)); }
 async function docSaveNow(){
   docSaveTimer=null;
   if(!D) return;

@@ -578,6 +578,6 @@ async function importBackup(obj){
     have.add(it.id); added++;
   }
   await wsSave(); renderSidebar();
-  if(Store.mode==='server') buildMissingMirrors();
+  if(Store.remote) buildMissingMirrors();
   toast(added+' item(ns) importado(s)'+(skipped?' · '+skipped+' já existiam e foram mantidos':''));
 }

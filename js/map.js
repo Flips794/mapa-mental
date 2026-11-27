@@ -119,7 +119,11 @@ async function mapOpen(id){
   selectedId=M.root.id;
   if(appMode==='map'){ render(); fit(false); outlineRefresh(true); } else mapNeedsFit=true;
 }
-async function mapFlush(){ if(M && saveTimer){ clearTimeout(saveTimer); saveTimer=null; await saveNow(); } }
+async function mapFlush(){
+  if(M && saveTimer){ clearTimeout(saveTimer); saveTimer=null; await saveNow(); }
+  // cópia em texto pendente sai antes de trocar de mapa
+  if(M && mirrorTimer){ clearTimeout(mirrorTimer); mirrorTimer=null; Store.setText(curMapId, mapTitle(), mapToText().text); }
+}
 function mapShown(){ render(); if(mapNeedsFit){ fit(false); mapNeedsFit=false; } outlineRefresh(true); }
 
 /* ================= Árvore ================= */
@@ -949,7 +953,7 @@ function persistable(){
   const files={}; used.forEach(k=>{ if(M.files[k]) files[k]=M.files[k]; });
   return {version:3, title:mapTitle(), trees:M.trees, files};
 }
-function saveSoon(){ fastIndex=null; outlineRefreshSoon(); setStatus('Salvando…'); clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,400); }
+function saveSoon(){ fastIndex=null; outlineRefreshSoon(); setStatus('Salvando…'); clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,Store.delay(400)); }
 async function saveNow(){
   saveTimer=null;
   if(!M || !curMapId) return;
@@ -962,10 +966,10 @@ async function saveNow(){
 /* cópia legível em dados/texto/ (só no modo servidor), sem pesar a digitação */
 let mirrorTimer=null;
 function scheduleMirror(){
-  if(Store.mode!=='server') return;
+  if(!Store.remote) return;
   clearTimeout(mirrorTimer);
   const id=curMapId;
-  mirrorTimer=setTimeout(()=>{ if(M && curMapId===id) Store.setText(id, mapTitle(), mapToText().text); },1500);
+  mirrorTimer=setTimeout(()=>{ if(M && curMapId===id) Store.setText(id, mapTitle(), mapToText().text); }, Store.mode==='github' ? 30000 : 1500);
 }
 window.addEventListener('pagehide',()=>{ if(M && curMapId) Store.set('map:'+curMapId, persistable()); });
 
