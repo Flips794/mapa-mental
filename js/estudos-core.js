@@ -281,8 +281,183 @@ function agenda(itens, sessoesPorItem, aj, hojeStr){
   return out;
 }
 
+/* ---------- Estatísticas (nunca contam excluídos nem duplicados) ---------- */
+function unicos(lista){
+  const vistos = new Map();
+  for (const r of lista || []) if (r && !r.excluida) vistos.set(r.id, r);
+  return [...vistos.values()];
+}
+const qf = (s) => (s.questoes && s.questoes.feitas) || 0;
+const qa = (s) => (s.questoes && Math.min(s.questoes.acertos || 0, s.questoes.feitas || 0)) || 0;
+function somar(sessoes, sims){
+  const t = { questoes: 0, acertos: 0, minutos: 0 };
+  for (const s of sessoes){ t.questoes += qf(s); t.acertos += qa(s); t.minutos += s.minutos || 0; }
+  for (const m of sims || []){ t.questoes += m.questoes || 0; t.acertos += m.acertos || 0; t.minutos += m.minutos || 0; }
+  return t;
+}
+function resumoDia(sessoes, simulados, data){
+  const ss = unicos(sessoes).filter(s => s.data === data);
+  const ms = unicos(simulados).filter(m => m.data === data);
+  const t = somar(ss, ms);
+  return { assuntos: new Set(ss.map(s => s.itemId)).size, sessoes: ss.length, questoes: t.questoes, acertos: t.acertos, minutos: t.minutos };
+}
+function serieDiaria(sessoes, simulados, de, ate){
+  const ss = unicos(sessoes), ms = unicos(simulados), out = [];
+  for (let d = de; d <= ate; d = addDias(d, 1)){
+    const t = somar(ss.filter(s => s.data === d), ms.filter(m => m.data === d));
+    out.push(Object.assign({ data: d }, t));
+  }
+  return out;
+}
+function porAssunto(itens, sessoes, aj, hojeStr){
+  const ss = unicos(sessoes), out = [];
+  for (const it of unicos(itens)){
+    const minhas = ss.filter(s => s.itemId === it.id);
+    if (!minhas.length) continue;
+    const t = somar(minhas, []);
+    out.push(Object.assign({ item: it, estado: calcularEstado(it, minhas, aj, hojeStr) }, t));
+  }
+  return out;
+}
+function porMateria(itens, sessoes, aj, hojeStr){
+  const grupos = new Map();
+  for (const a of porAssunto(itens, sessoes, aj, hojeStr)){
+    const nome = a.item.materia || 'Outros';
+    const g = grupos.get(nome) || { materia: nome, minutos: 0, questoes: 0, acertos: 0, assuntos: 0, criticos: 0 };
+    g.minutos += a.minutos; g.questoes += a.questoes; g.acertos += a.acertos; g.assuntos++;
+    if (a.estado.status === 'retomada' || a.estado.dominio.categoria === 'critico') g.criticos++;
+    grupos.set(nome, g);
+  }
+  return [...grupos.values()].sort((x, y) => y.minutos - x.minutos || y.questoes - x.questoes);
+}
+function evolucaoMensal(sessoes, simulados){
+  const meses = new Map();
+  const add = (mes, q, a, m) => { const g = meses.get(mes) || { mes, minutos: 0, questoes: 0, acertos: 0 }; g.questoes += q; g.acertos += a; g.minutos += m; meses.set(mes, g); };
+  for (const s of unicos(sessoes)) add(mesDe(s.data), qf(s), qa(s), s.minutos || 0);
+  for (const m of unicos(simulados)) add(mesDe(m.data), m.questoes || 0, m.acertos || 0, m.minutos || 0);
+  return [...meses.values()].sort((x, y) => x.mes < y.mes ? -1 : 1);
+}
+function tempoMedioPorQuestao(sessoes, simulados){
+  let min = 0, q = 0;
+  for (const s of unicos(sessoes)) if (s.minutos > 0 && qf(s) > 0){ min += s.minutos; q += qf(s); }
+  for (const m of unicos(simulados)) if (m.minutos > 0 && m.questoes > 0){ min += m.minutos; q += m.questoes; }
+  return q > 0 ? Math.round(min * 60 / q) : null;
+}
+function produtividade(sessoes, de, ate){
+  const ss = unicos(sessoes).filter(s => s.data >= de && s.data <= ate);
+  const dias = new Set(ss.map(s => s.data));
+  const totalDias = diffDias(de, ate) + 1;
+  let seq = 0, d = dias.has(ate) ? ate : addDias(ate, -1);
+  const todosDias = new Set(unicos(sessoes).map(s => s.data));
+  while (todosDias.has(d)){ seq++; d = addDias(d, -1); }
+  return { diasEstudados: dias.size, mediaMinutosDia: Math.round(ss.reduce((t, s) => t + (s.minutos || 0), 0) / totalDias), sequenciaAtual: seq };
+}
+
+/* ---------- Planejamento (Etapa 2): planejado só conta com sessão registrada ---------- */
+function planoStatus(plano, sessoesLigadas, hojeStr){
+  if (plano.status === 'cancelada') return 'cancelada';
+  if (plano.status === 'reagendada') return 'reagendada';
+  if (unicos(sessoesLigadas).some(s => s.planoId === plano.id)) return 'concluida';
+  return plano.data < (hojeStr || hoje()) ? 'atrasada' : 'pendente';
+}
+function realizadoDoPlano(sessoesLigadas){
+  const t = somar(unicos(sessoesLigadas), []);
+  return { minutos: t.minutos, questoes: t.questoes };
+}
+function resumoSemana(planos, sessoes, inicio, hojeStr){
+  const ps = unicos(planos), ss = unicos(sessoes), fimSemana = addDias(inicio, 6);
+  const dias = [];
+  const planejado = { minutos: 0, questoes: 0 };
+  for (let i = 0; i < 7; i++){
+    const data = addDias(inicio, i);
+    const itens = ps.filter(p => p.data === data).map(plano => {
+      const ligadas = ss.filter(s => s.planoId === plano.id);
+      return { plano, status: planoStatus(plano, ligadas, hojeStr), realizado: realizadoDoPlano(ligadas) };
+    });
+    for (const x of itens) if (x.status !== 'reagendada' && x.status !== 'cancelada'){ planejado.minutos += x.plano.metaMinutos || 0; planejado.questoes += x.plano.metaQuestoes || 0; }
+    dias.push({ data, itens });
+  }
+  const t = somar(ss.filter(s => s.data >= inicio && s.data <= fimSemana), []);
+  return { dias, planejado, realizado: { minutos: t.minutos, questoes: t.questoes } };
+}
+function reagendarPlano(col, id, novaData, agoraISO, novoId){
+  const orig = col.registros[id];
+  if (!orig || orig.excluida) return col;
+  col = salvarRegistro(col, Object.assign(conteudo(orig), { status: 'reagendada', reagendadaPara: novaData }), agoraISO);
+  const novo = Object.assign(conteudo(orig), { id: novoId, data: novaData, status: 'planejada', origemId: id });
+  delete novo.reagendadaPara;
+  return salvarRegistro(col, novo, agoraISO);
+}
+
+/* ---------- Banco de erros (Etapa 3) ---------- */
+const MOTIVOS_ERRO = [['desconhecimento', 'Desconhecimento'], ['esquecimento', 'Esquecimento'], ['interpretacao', 'Interpretação'], ['calculo', 'Cálculo'], ['confusao', 'Confusão conceitual'], ['desatencao', 'Desatenção']];
+function estatisticasErros(erros, itens){
+  const porId = new Map(unicos(itens).map(i => [i.id, i]));
+  const porMotivo = {}, mats = new Map(), asss = new Map();
+  let total = 0;
+  for (const e of unicos(erros)){
+    const n = e.quantidade > 0 ? e.quantidade : 1;
+    total += n;
+    porMotivo[e.motivo] = (porMotivo[e.motivo] || 0) + n;
+    const it = porId.get(e.itemId);
+    const mat = (it && it.materia) || e.materia || 'Outros';
+    const gm = mats.get(mat) || { materia: mat, total: 0, porMotivo: {} };
+    gm.total += n; gm.porMotivo[e.motivo] = (gm.porMotivo[e.motivo] || 0) + n; mats.set(mat, gm);
+    if (it){ const ga = asss.get(it.id) || { item: it, total: 0, porMotivo: {} }; ga.total += n; ga.porMotivo[e.motivo] = (ga.porMotivo[e.motivo] || 0) + n; asss.set(it.id, ga); }
+  }
+  const ord = (a, b) => b.total - a.total;
+  return { total, porMotivo, porMateria: [...mats.values()].sort(ord), porAssunto: [...asss.values()].sort(ord) };
+}
+
+/* ---------- Simulados (Etapa 3) ---------- */
+const CRITERIOS_PADRAO = [
+  { id: 'cebraspe', nome: 'Cebraspe (cada erro anula um acerto)', pontosAcerto: 1, penalidadeErro: 1, pontosBranco: 0, fixo: true },
+  { id: 'simples', nome: 'Sem penalidade', pontosAcerto: 1, penalidadeErro: 0, pontosBranco: 0, fixo: true },
+];
+function validarSimulado(s){
+  const erros = [];
+  const n = (v) => Number.isInteger(v) && v >= 0;
+  if (!(s.questoes > 0) || !Number.isInteger(s.questoes)) erros.push('Informe a quantidade de questões.');
+  if (!n(s.acertos) || !n(s.erros) || !n(s.brancos)) erros.push('Acertos, erros e em branco precisam ser números inteiros (zero ou mais).');
+  else if (s.acertos + s.erros + s.brancos !== s.questoes) erros.push('Acertos + erros + em branco (' + (s.acertos + s.erros + s.brancos) + ') precisa ser igual ao total de questões (' + s.questoes + ').');
+  return erros;
+}
+function notaSimulado(s, criterio){
+  const c = criterio || CRITERIOS_PADRAO[1];
+  const nota = Math.round(((s.acertos || 0) * c.pontosAcerto - (s.erros || 0) * c.penalidadeErro + (s.brancos || 0) * c.pontosBranco) * 100) / 100;
+  const maxima = (s.questoes || 0) * c.pontosAcerto;
+  return { nota, maxima, percentual: maxima > 0 ? Math.round(nota / maxima * 1000) / 10 : 0 };
+}
+function evolucaoSimulados(sims, criterios){
+  const cs = criterios || CRITERIOS_PADRAO;
+  return unicos(sims).sort((a, b) => a.data < b.data ? -1 : a.data > b.data ? 1 : 0).map(s => {
+    const c = cs.find(x => x.id === s.criterioId) || CRITERIOS_PADRAO[1];
+    return Object.assign({ simulado: s }, notaSimulado(s, c));
+  });
+}
+
+/* ---------- Pontos fracos (Etapa 4) ---------- */
+function pontosFracos(itens, estados, estatErros){
+  const errosPorItem = new Map(((estatErros && estatErros.porAssunto) || []).map(a => [a.item.id, a.total]));
+  const out = [];
+  for (const it of unicos(itens)){
+    const e = estados.get(it.id); if (!e) continue;
+    const motivos = []; let peso = 0;
+    if (e.status === 'retomada'){ motivos.push('Retomada recomendada'); peso += 3; }
+    if (e.dominio && e.dominio.categoria === 'critico'){ motivos.push('Domínio crítico'); peso += 3; }
+    if (e.retencao && e.retencao.categoria === 'critico'){ motivos.push('Retenção crítica'); peso += 2; }
+    const ne = errosPorItem.get(it.id) || 0;
+    if (ne >= 5){ motivos.push('Muitos erros (' + ne + ')'); peso += 1 + Math.floor(ne / 10); }
+    if (motivos.length) out.push({ item: it, motivos, peso });
+  }
+  return out.sort((a, b) => b.peso - a.peso);
+}
+
 const api = {
   AJUSTES_PADRAO,
+  unicos, resumoDia, serieDiaria, porAssunto, porMateria, evolucaoMensal, tempoMedioPorQuestao, produtividade,
+  planoStatus, realizadoDoPlano, resumoSemana, reagendarPlano,
+  MOTIVOS_ERRO, estatisticasErros, CRITERIOS_PADRAO, validarSimulado, notaSimulado, evolucaoSimulados, pontosFracos,
   escadaDo, calcularEstado, agenda,
   ordenarSessoes, resultadoSessao, categoria, dominio, retencao,
   colecao, salvarRegistro, excluirRegistro, registrosAtivos, mesclarColecoes, estavel,

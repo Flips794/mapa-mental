@@ -310,3 +310,113 @@ test('assunto sem revisão não entra na agenda; agenda conta os próximos 7 dia
   assert.equal(ag.proximos7, 1);   // c em 27/11
   assert.equal(C.calcularEstado(itens[1], m.get('b'), AJ, '2026-11-21').status, 'sem-revisao');
 });
+
+/* ---------- Task 5: estatísticas, planejamento, erros, simulados ---------- */
+test('Cebraspe: cada erro anula um acerto; nota negativa é permitida', () => {
+  const ceb = C.CRITERIOS_PADRAO.find(c => c.id === 'cebraspe');
+  assert.deepEqual(C.notaSimulado({ questoes: 100, acertos: 70, erros: 20, brancos: 10 }, ceb), { nota: 50, maxima: 100, percentual: 50 });
+  assert.equal(C.notaSimulado({ questoes: 100, acertos: 40, erros: 50, brancos: 10 }, ceb).nota, -10);
+  const simples = C.CRITERIOS_PADRAO.find(c => c.id === 'simples');
+  assert.equal(C.notaSimulado({ questoes: 100, acertos: 70, erros: 20, brancos: 10 }, simples).nota, 70);
+  const proprio = { id: 'x', pontosAcerto: 2, penalidadeErro: 0.5, pontosBranco: 0 };
+  assert.deepEqual(C.notaSimulado({ questoes: 10, acertos: 6, erros: 4, brancos: 0 }, proprio), { nota: 10, maxima: 20, percentual: 50 });
+});
+
+test('validação do simulado acusa soma que não fecha', () => {
+  assert.deepEqual(C.validarSimulado({ questoes: 100, acertos: 70, erros: 20, brancos: 10 }), []);
+  assert.ok(C.validarSimulado({ questoes: 100, acertos: 70, erros: 20, brancos: 5 }).length > 0);
+  assert.ok(C.validarSimulado({ questoes: 0, acertos: 0, erros: 0, brancos: 0 }).length > 0);
+  assert.ok(C.validarSimulado({ questoes: 10, acertos: -1, erros: 11, brancos: 0 }).length > 0);
+});
+
+test('evolução dos simulados em ordem de data com nota pelo critério de cada um', () => {
+  const sims = [{ id: 'b', data: '2026-11-20', criterioId: 'cebraspe', questoes: 10, acertos: 8, erros: 2, brancos: 0 }, { id: 'a', data: '2026-11-10', criterioId: 'simples', questoes: 10, acertos: 5, erros: 5, brancos: 0 }, { id: 'c', data: '2026-11-25', excluida: true, questoes: 10, acertos: 10, erros: 0, brancos: 0 }];
+  const ev = C.evolucaoSimulados(sims, C.CRITERIOS_PADRAO);
+  assert.deepEqual(ev.map(x => [x.simulado.id, x.nota]), [['a', 5], ['b', 6]]);
+});
+
+test('planejado só vira concluído com sessão ligada; excluir a sessão desfaz', () => {
+  const plano = { id: 'p1', data: '2026-11-20', metaMinutos: 60, metaQuestoes: 20, status: 'planejada' };
+  assert.equal(C.planoStatus(plano, [], '2026-11-20'), 'pendente');
+  assert.equal(C.planoStatus(plano, [], '2026-11-21'), 'atrasada');
+  const s = ses({ data: '2026-11-20', planoId: 'p1', minutos: 50, questoes: { feitas: 15, acertos: 12 } });
+  assert.equal(C.planoStatus(plano, [s], '2026-11-21'), 'concluida');
+  assert.equal(C.planoStatus(plano, [Object.assign({}, s, { excluida: true })], '2026-11-21'), 'atrasada');
+  assert.deepEqual(C.realizadoDoPlano([s, ses({ planoId: 'p1', minutos: 10 })]), { minutos: 60, questoes: 15 });
+  assert.equal(C.planoStatus(Object.assign({}, plano, { status: 'cancelada' }), [], '2026-11-25'), 'cancelada');
+});
+
+test('reagendar marca o original e cria um novo ligado a ele', () => {
+  let col = C.salvarRegistro(C.colecao(), { id: 'p1', data: '2026-11-20', itemId: 'i1', metaMinutos: 60, metaQuestoes: 0, status: 'planejada' }, T1);
+  col = C.reagendarPlano(col, 'p1', '2026-11-24', T2, 'p2');
+  assert.equal(col.registros.p1.status, 'reagendada');
+  assert.equal(col.registros.p1.reagendadaPara, '2026-11-24');
+  assert.equal(col.registros.p2.data, '2026-11-24');
+  assert.equal(col.registros.p2.origemId, 'p1');
+  assert.equal(col.registros.p2.status, 'planejada');
+  assert.equal(col.registros.p2.itemId, 'i1');
+  assert.equal(C.planoStatus(col.registros.p1, [], '2026-11-30'), 'reagendada');
+});
+
+test('resumo da semana compara planejado com tudo o que foi realizado', () => {
+  const planos = [{ id: 'p1', data: '2026-11-23', metaMinutos: 60, metaQuestoes: 20, status: 'planejada' }, { id: 'p2', data: '2026-11-25', metaMinutos: 30, metaQuestoes: 10, status: 'reagendada' }, { id: 'p3', data: '2026-11-26', metaMinutos: 30, metaQuestoes: 10, status: 'planejada', origemId: 'p2' }];
+  const sessoes = [ses({ data: '2026-11-23', planoId: 'p1', minutos: 45, questoes: { feitas: 20, acertos: 15 } }), ses({ data: '2026-11-24', minutos: 30, questoes: { feitas: 5, acertos: 5 } }), ses({ data: '2026-11-30', minutos: 99 })];
+  const r = C.resumoSemana(planos, sessoes, '2026-11-23', '2026-11-27');
+  assert.equal(r.dias.length, 7);
+  assert.deepEqual(r.planejado, { minutos: 90, questoes: 30 });
+  assert.deepEqual(r.realizado, { minutos: 75, questoes: 25 });
+  assert.equal(r.dias[0].itens[0].status, 'concluida');
+  assert.equal(r.dias[3].itens[0].status, 'atrasada');   // dia 26 visto no dia 27 sem registro
+});
+
+test('estatísticas do dia não contam excluídas nem duplicadas e incluem simulados', () => {
+  const s1 = ses({ id: 'x1', itemId: 'a', data: '2026-11-27', minutos: 30, questoes: { feitas: 10, acertos: 8 } });
+  const sessoes = [s1, Object.assign({}, s1), ses({ itemId: 'b', data: '2026-11-27', minutos: 20 }), ses({ itemId: 'c', data: '2026-11-27', excluida: true, questoes: { feitas: 50, acertos: 50 } }), ses({ itemId: 'a', data: '2026-11-26', questoes: { feitas: 5, acertos: 5 } })];
+  const sims = [{ id: 'sm', data: '2026-11-27', questoes: 20, acertos: 15, erros: 5, brancos: 0, minutos: 40 }];
+  assert.deepEqual(C.resumoDia(sessoes, sims, '2026-11-27'), { assuntos: 2, sessoes: 2, questoes: 30, acertos: 23, minutos: 90 });
+  const serie = C.serieDiaria(sessoes, sims, '2026-11-26', '2026-11-27');
+  assert.deepEqual(serie.map(d => d.questoes), [5, 30]);
+});
+
+test('tempo médio por questão, evolução mensal e produtividade', () => {
+  const sessoes = [ses({ data: '2026-11-25', minutos: 60, questoes: { feitas: 40, acertos: 30 } }), ses({ data: '2026-11-26', minutos: 30 }), ses({ data: '2026-11-27', questoes: { feitas: 10, acertos: 5 } }), ses({ data: '2026-10-10', minutos: 10, questoes: { feitas: 5, acertos: 5 } })];
+  assert.equal(C.tempoMedioPorQuestao(sessoes.slice(0, 3), []), 90);
+  assert.deepEqual(C.evolucaoMensal(sessoes, []).map(m => [m.mes, m.questoes]), [['2026-10', 5], ['2026-11', 50]]);
+  const p = C.produtividade(sessoes, '2026-11-21', '2026-11-27');
+  assert.equal(p.diasEstudados, 3);
+  assert.equal(p.sequenciaAtual, 3);
+  assert.equal(p.mediaMinutosDia, Math.round(90 / 7));
+});
+
+test('estatísticas por matéria e por assunto', () => {
+  const itens = [item({ id: 'a', materia: 'Matemática' }), item({ id: 'b', materia: 'Matemática' }), item({ id: 'c', materia: 'Penal' })];
+  const sessoes = [ses({ itemId: 'a', data: '2026-11-20', minutos: 30, questoes: { feitas: 10, acertos: 9 } }), ses({ itemId: 'c', data: '2026-11-20', minutos: 90, questoes: { feitas: 10, acertos: 3 } })];
+  const pm = C.porMateria(itens, sessoes, AJ, '2026-11-27');
+  assert.deepEqual(pm.map(m => [m.materia, m.minutos, m.questoes, m.acertos, m.assuntos]), [['Penal', 90, 10, 3, 1], ['Matemática', 30, 10, 9, 1]]);
+  const pa = C.porAssunto(itens, sessoes, AJ, '2026-11-27');
+  assert.equal(pa.length, 2);
+  assert.equal(pa.find(x => x.item.id === 'c').acertos, 3);
+});
+
+test('banco de erros por motivo, matéria e assunto', () => {
+  const itens = [item({ id: 'a', materia: 'Matemática' }), item({ id: 'c', materia: 'Penal' })];
+  const erros = [{ id: 'e1', itemId: 'a', motivo: 'calculo', quantidade: 3 }, { id: 'e2', itemId: 'a', motivo: 'desatencao' }, { id: 'e3', itemId: 'c', motivo: 'calculo', quantidade: 2 }, { id: 'e4', itemId: 'c', motivo: 'calculo', excluida: true, quantidade: 9 }];
+  const st = C.estatisticasErros(erros, itens);
+  assert.equal(st.total, 6);
+  assert.deepEqual(st.porMotivo, { calculo: 5, desatencao: 1 });
+  assert.deepEqual(st.porMateria.map(m => [m.materia, m.total]), [['Matemática', 4], ['Penal', 2]]);
+  assert.equal(st.porAssunto[0].item.id, 'a');
+  assert.equal(C.MOTIVOS_ERRO.length, 6);
+});
+
+test('pontos fracos juntam domínio crítico, retomada, retenção e erros', () => {
+  const itens = [item({ id: 'a' }), item({ id: 'b' }), item({ id: 'c' })];
+  const estados = new Map([
+    ['a', { status: 'retomada', dominio: { categoria: 'critico' }, retencao: { categoria: null } }],
+    ['b', { status: 'ativo', dominio: { categoria: 'bom' }, retencao: { categoria: 'critico' } }],
+    ['c', { status: 'ativo', dominio: { categoria: 'excelente' }, retencao: { categoria: 'bom' } }],
+  ]);
+  const pf = C.pontosFracos(itens, estados, { porAssunto: [{ item: itens[1], total: 6 }] });
+  assert.deepEqual(pf.map(p => p.item.id), ['a', 'b']);
+  assert.ok(pf[1].motivos.some(m => /erros/i.test(m)));
+});
