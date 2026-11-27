@@ -663,3 +663,156 @@ EST_VIEWS._ligarPlanejadoHoje = function(body){
     row.onclick = () => estRegistrarDoPlano(p);
   });
 };
+
+/* =========================================================
+   Banco de erros
+   ========================================================= */
+const MOTIVO_TXT = Object.fromEntries(EC.MOTIVOS_ERRO);
+function barrasHtml(pares, total, formato){
+  const max = Math.max(1, ...pares.map(p => p[1]));
+  return '<div class="est-barras">' + pares.map(([rot, v]) => '<div class="est-barra"><span class="rot"></span><div class="trilho"><i style="width:' + Math.round(v / max * 100) + '%"></i></div><b>' + (formato ? formato(v) : v) + (total ? ' <small>(' + pct(v, total) + '%)</small>' : '') + '</b></div>').join('') + '</div>';
+}
+function preencherRotulos(box, pares){ box.querySelectorAll('.est-barra .rot').forEach((s, i) => { s.textContent = pares[i][0]; s.title = pares[i][0]; }); }
+function desdePeriodo(dias){ return dias ? EC.addDias(estHoje(), -(dias - 1)) : '0000-00-00'; }
+EST_VIEWS.erros = function(body){
+  const f = estUi.filtroErros;
+  const itens = ED.todas('itens');
+  const porId = new Map(itens.map(i => [i.id, i]));
+  const de = desdePeriodo(f.periodo == null ? 30 : f.periodo);
+  let erros = ED.todas('erros').filter(e => e.data >= de);
+  if (f.materia) erros = erros.filter(e => ((porId.get(e.itemId) || {}).materia || e.materia || 'Outros') === f.materia);
+  if (f.motivo) erros = erros.filter(e => e.motivo === f.motivo);
+  const st = EC.estatisticasErros(erros, itens);
+  const materias = [...new Set(itens.map(i => i.materia || 'Outros'))].sort();
+  const parMotivo = EC.MOTIVOS_ERRO.map(([k, t]) => [t, st.porMotivo[k] || 0]).filter(p => p[1] > 0).sort((a, b) => b[1] - a[1]);
+  const parMat = st.porMateria.map(m => [m.materia, m.total]);
+  const parAss = st.porAssunto.slice(0, 10).map(a => [a.item.caminho, a.total]);
+  body.innerHTML = '<div class="est-hoje est-largo"><div class="est-nav"><h2 class="est-h2">Banco de erros</h2><div class="spacer"></div><button class="btn-s primary" id="errNovo">＋ Registrar erro</button></div>'
+    + '<div class="est-filtros"><select id="fPer"><option value="7">Últimos 7 dias</option><option value="30">Últimos 30 dias</option><option value="90">Últimos 90 dias</option><option value="0">Tudo</option></select>'
+    + '<select id="fMat"><option value="">Todas as matérias</option>' + materias.map(m => '<option>' + esc(m) + '</option>').join('') + '</select>'
+    + '<select id="fMot"><option value="">Todos os motivos</option>' + EC.MOTIVOS_ERRO.map(([k, t]) => '<option value="' + k + '">' + t + '</option>').join('') + '</select></div>'
+    + (st.total ? '<div class="est-grade2"><section class="est-sec"><h3>Por motivo · ' + st.total + ' erro(s)</h3><div id="bMot"></div></section><section class="est-sec"><h3>Por matéria</h3><div id="bMat"></div></section></div>'
+      + '<section class="est-sec"><h3>Assuntos com mais erros</h3><div id="bAss"></div></section>' : '<div class="est-vazio">Nenhum erro registrado neste filtro. Ao registrar questões, você pode classificar os erros por motivo — ou registrar um erro avulso aqui.</div>')
+    + (erros.length ? '<section class="est-sec"><h3>Registros (' + erros.length + ')</h3><div class="est-hist sem-borda">' + erros.sort((a, b) => a.data < b.data ? 1 : -1).map(e => '<div class="est-h-row" data-id="' + esc(e.id) + '"><span class="d">' + fmtData(e.data, true) + '</span><span class="t">' + esc(MOTIVO_TXT[e.motivo] || e.motivo) + '</span><span class="m"></span><span class="r">×' + (e.quantidade || 1) + '</span>' + (e.sessaoId ? '<span class="est-tag" title="Classificado ao registrar questões">da sessão</span>' : '<button class="ib" data-editar title="Editar">✎</button>') + '<button class="ib danger" data-excluir title="Excluir">🗑</button></div>').join('') + '</div></section>' : '')
+    + '</div>';
+  body.querySelector('#fPer').value = String(f.periodo == null ? 30 : f.periodo);
+  body.querySelector('#fMat').value = f.materia || ''; body.querySelector('#fMot').value = f.motivo || '';
+  body.querySelector('#fPer').onchange = (e) => { f.periodo = Number(e.target.value); estRender(); };
+  body.querySelector('#fMat').onchange = (e) => { f.materia = e.target.value; estRender(); };
+  body.querySelector('#fMot').onchange = (e) => { f.motivo = e.target.value; estRender(); };
+  if (st.total){
+    body.querySelector('#bMot').innerHTML = barrasHtml(parMotivo, st.total); preencherRotulos(body.querySelector('#bMot'), parMotivo);
+    body.querySelector('#bMat').innerHTML = barrasHtml(parMat, st.total); preencherRotulos(body.querySelector('#bMat'), parMat);
+    body.querySelector('#bAss').innerHTML = barrasHtml(parAss, 0); preencherRotulos(body.querySelector('#bAss'), parAss);
+  }
+  body.querySelectorAll('.est-h-row').forEach(row => {
+    const e = erros.find(x => x.id === row.dataset.id), it = porId.get(e.itemId);
+    row.querySelector('.m').textContent = (it ? it.caminho : (e.materia || '')) + (e.observacao ? ' — ' + e.observacao : '');
+    const ed = row.querySelector('[data-editar]'); if (ed) ed.onclick = () => estAbrirErro(e);
+    row.querySelector('[data-excluir]').onclick = async () => { if (!confirm('Excluir este registro de erro?')) return; await ED.excluirErro(e.id); estRender(); };
+  });
+  body.querySelector('#errNovo').onclick = () => estAbrirErro(null);
+};
+function estAbrirErro(e){
+  const itens = ED.todas('itens').sort((a, b) => a.caminho < b.caminho ? -1 : 1);
+  const { el, fechar } = estModal('<div class="modal-head"><b>' + (e ? 'Editar erro' : 'Registrar erro') + '</b><button class="ib" data-fechar>✕</button></div><div class="est-form">'
+    + '<div class="est-campo"><label>Assunto</label><select id="eItem"><option value="">— escolha um assunto acompanhado —</option>' + itens.map(i => '<option value="' + esc(i.id) + '">' + esc(i.caminho) + '</option>').join('') + '</select></div>'
+    + '<div class="est-linha2"><div class="est-campo"><label>Motivo</label><select id="eMot">' + EC.MOTIVOS_ERRO.map(([k, t]) => '<option value="' + k + '">' + t + '</option>').join('') + '</select></div>'
+    + '<div class="est-campo"><label>Quantidade</label><input type="number" min="1" id="eQtd" value="1"></div><div class="est-campo"><label>Data</label><input type="date" id="eData"></div></div>'
+    + '<div class="est-campo"><label>Observação (opcional)</label><textarea id="eObs" rows="3" placeholder="O que confundiu, o enunciado, a regra certa…"></textarea></div>'
+    + '<div class="est-msg" id="eMsg"></div><div class="est-row fim"><button class="btn-s" data-fechar>Cancelar</button><button class="btn-s primary" id="eOk">Salvar</button></div></div>', 'est-box');
+  el.querySelector('#eData').value = e ? e.data : estHoje();
+  if (e){ el.querySelector('#eItem').value = e.itemId || ''; el.querySelector('#eMot').value = e.motivo; el.querySelector('#eQtd').value = e.quantidade || 1; el.querySelector('#eObs').value = e.observacao || ''; }
+  el.querySelector('#eOk').onclick = async () => {
+    const itemId = el.querySelector('#eItem').value, q = parseInt(el.querySelector('#eQtd').value, 10);
+    const msg = el.querySelector('#eMsg');
+    if (!itemId){ msg.textContent = 'Escolha o assunto (registre um estudo antes, se ele ainda não aparece).'; msg.className = 'est-msg err'; return; }
+    if (!(q >= 1)){ msg.textContent = 'Quantidade precisa ser 1 ou mais.'; msg.className = 'est-msg err'; return; }
+    await ED.salvarErro({ id: e ? e.id : ED.novoId(), itemId, motivo: el.querySelector('#eMot').value, quantidade: q, data: el.querySelector('#eData').value || estHoje(), observacao: el.querySelector('#eObs').value.trim() });
+    fechar(); estRender();
+  };
+}
+
+/* =========================================================
+   Simulados
+   ========================================================= */
+EST_VIEWS.simulados = function(body){
+  const criterios = ED.criterios();
+  const ev = EC.evolucaoSimulados(ED.simulados(), criterios);
+  const ult = ev[ev.length - 1], melhor = ev.slice().sort((a, b) => b.percentual - a.percentual)[0];
+  const media = ev.length ? Math.round(ev.reduce((t, x) => t + x.percentual, 0) / ev.length * 10) / 10 : null;
+  const nomeCrit = (id) => (criterios.find(c => c.id === id) || { nome: '—' }).nome;
+  const linhas = ev.slice().reverse();
+  body.innerHTML = '<div class="est-hoje est-largo"><div class="est-nav"><h2 class="est-h2">Simulados</h2><div class="spacer"></div><button class="btn-s" id="smCrit">Critérios de pontuação</button><button class="btn-s primary" id="smNovo">＋ Novo simulado</button></div>'
+    + (ev.length ? '<div class="est-cards">'
+      + '<div class="est-card"><span>Último</span><b>' + ult.nota + ' <small>/ ' + ult.maxima + '</small></b><i>' + ult.percentual + '%</i><small>' + fmtData(ult.simulado.data, true) + '</small></div>'
+      + '<div class="est-card"><span>Melhor</span><b>' + melhor.percentual + '%</b><small>' + esc(melhor.simulado.concurso || '') + ' · ' + fmtData(melhor.simulado.data, true) + '</small></div>'
+      + '<div class="est-card"><span>Média</span><b>' + media + '%</b><small>' + ev.length + ' simulado(s)</small></div></div>'
+      + '<section class="est-sec"><h3>Evolução (% da nota máxima)</h3><div class="est-evol">' + ev.map(x => '<div class="est-evol-col" title="' + esc((x.simulado.concurso || 'Simulado') + ' · ' + fmtData(x.simulado.data, true) + ' · ' + x.percentual + '%') + '"><i style="height:' + Math.max(2, Math.max(0, x.percentual)) + '%" class="' + (x.percentual < 0 ? 'neg' : '') + '"></i><span>' + fmtData(x.simulado.data) + '</span></div>').join('') + '</div></section>'
+      + '<section class="est-sec"><h3>Histórico</h3><div class="est-tabela"><table><thead><tr><th>Data</th><th>Concurso / banca</th><th>Critério</th><th>A / E / B</th><th>Nota</th><th>%</th><th>Tempo</th><th>s/questão</th><th></th></tr></thead><tbody>'
+      + linhas.map(x => { const s = x.simulado; return '<tr data-id="' + esc(s.id) + '"><td>' + fmtData(s.data, true) + '</td><td>' + esc([s.concurso, s.banca].filter(Boolean).join(' · ') || '—') + '</td><td>' + esc(nomeCrit(s.criterioId)) + '</td><td>' + s.acertos + ' / ' + s.erros + ' / ' + s.brancos + '</td><td><b>' + x.nota + '</b> / ' + x.maxima + '</td><td>' + x.percentual + '%</td><td>' + (s.minutos ? fmtMin(s.minutos) : '—') + '</td><td>' + (s.minutos && s.questoes ? Math.round(s.minutos * 60 / s.questoes) : '—') + '</td><td><button class="ib" data-editar title="Editar">✎</button><button class="ib danger" data-excluir title="Excluir">🗑</button></td></tr>'; }).join('')
+      + '</tbody></table></div></section>'
+      : '<div class="est-vazio">Nenhum simulado registrado. Use "Novo simulado" para acompanhar notas, tempo e evolução — com o critério da banca (ex.: Cebraspe, em que cada erro anula um acerto).</div>')
+    + '</div>';
+  body.querySelector('#smNovo').onclick = () => estAbrirSimulado(null);
+  body.querySelector('#smCrit').onclick = estAbrirCriterios;
+  body.querySelectorAll('tr[data-id]').forEach(tr => {
+    const s = ED.simulados().find(x => x.id === tr.dataset.id);
+    tr.querySelector('[data-editar]').onclick = () => estAbrirSimulado(s);
+    tr.querySelector('[data-excluir]').onclick = async () => { if (!confirm('Excluir este simulado?')) return; await ED.excluirSimulado(s.id); estRender(); };
+  });
+};
+function estAbrirSimulado(s){
+  const criterios = ED.criterios();
+  const mats = ws.items.filter(i => i.type === 'map').map(i => i.title);
+  const { el, fechar } = estModal('<div class="modal-head"><b>' + (s ? 'Editar simulado' : 'Novo simulado') + '</b><button class="ib" data-fechar>✕</button></div><div class="est-form">'
+    + '<div class="est-linha2"><div class="est-campo"><label>Data</label><input type="date" id="sData"></div><div class="est-campo"><label>Concurso</label><input id="sConc" placeholder="ex.: PCDF Perito Criminal"></div><div class="est-campo"><label>Banca</label><input id="sBanca" placeholder="ex.: Cebraspe"></div></div>'
+    + '<div class="est-campo"><label>Critério de pontuação</label><select id="sCrit">' + criterios.map(c => '<option value="' + esc(c.id) + '">' + esc(c.nome) + '</option>').join('') + '</select></div>'
+    + '<div class="est-linha2"><div class="est-campo"><label>Questões</label><input type="number" min="1" id="sQ"></div><div class="est-campo"><label>Acertos</label><input type="number" min="0" id="sA"></div><div class="est-campo"><label>Erros</label><input type="number" min="0" id="sE"></div><div class="est-campo"><label>Em branco</label><input type="number" min="0" id="sB"></div><div class="est-campo"><label>Tempo</label><input id="sT" placeholder="ex.: 3h"></div></div>'
+    + '<div class="est-nota" id="sNota"></div>'
+    + '<details class="est-erros-cl"><summary>Desempenho por matéria (opcional)</summary><div id="sMats"></div><button class="btn-s" id="sMatAdd">＋ Matéria</button><datalist id="sMatList">' + mats.map(m => '<option value="' + esc(m) + '">').join('') + '</datalist></details>'
+    + '<div class="est-campo"><label>Observação (opcional)</label><textarea id="sObs" rows="2"></textarea></div>'
+    + '<div class="est-msg" id="sMsg"></div><div class="est-row fim"><button class="btn-s" data-fechar>Cancelar</button><button class="btn-s primary" id="sOk">Salvar</button></div></div>', 'est-box');
+  const $s = (q) => el.querySelector(q);
+  $s('#sData').value = s ? s.data : estHoje();
+  $s('#sCrit').value = s ? s.criterioId : (criterios.find(c => c.id === 'cebraspe') ? 'cebraspe' : criterios[0].id);
+  if (s){ $s('#sConc').value = s.concurso || ''; $s('#sBanca').value = s.banca || ''; $s('#sQ').value = s.questoes; $s('#sA').value = s.acertos; $s('#sE').value = s.erros; $s('#sB').value = s.brancos; if (s.minutos) $s('#sT').value = fmtMin(s.minutos); $s('#sObs').value = s.observacao || ''; }
+  const linhaMat = (m) => { const d = document.createElement('div'); d.className = 'est-linha2 est-mat'; d.innerHTML = '<input list="sMatList" placeholder="Matéria" class="mm"><input type="number" min="0" placeholder="questões" class="mq"><input type="number" min="0" placeholder="acertos" class="ma"><input type="number" min="0" placeholder="erros" class="me"><button class="ib" title="Remover">✕</button>'; if (m){ d.querySelector('.mm').value = m.materia || ''; d.querySelector('.mq').value = m.questoes || ''; d.querySelector('.ma').value = m.acertos || ''; d.querySelector('.me').value = m.erros || ''; } d.querySelector('button').onclick = () => d.remove(); $s('#sMats').appendChild(d); };
+  (s && s.porMateria || []).forEach(linhaMat);
+  $s('#sMatAdd').onclick = () => linhaMat(null);
+  const ler = () => { const n = (q) => { const v = $s(q).value.trim(); return v === '' ? null : Number(v); }; const o = { questoes: n('#sQ'), acertos: n('#sA'), erros: n('#sE'), brancos: n('#sB') }; if (o.brancos == null && o.questoes != null && o.acertos != null && o.erros != null) o.brancos = o.questoes - o.acertos - o.erros; return o; };
+  const preview = () => {
+    const o = ler(), c = criterios.find(x => x.id === $s('#sCrit').value);
+    if (o.questoes == null || o.acertos == null || o.erros == null){ $s('#sNota').textContent = ''; return; }
+    const errs = EC.validarSimulado(o), r = EC.notaSimulado(o, c);
+    $s('#sNota').innerHTML = errs.length ? '<span class="err">' + esc(errs[0]) + '</span>' : 'Nota: <b>' + r.nota + '</b> de ' + r.maxima + ' (' + r.percentual + '%)' + (o.brancos != null && $s('#sB').value.trim() === '' ? ' · em branco calculado: ' + o.brancos : '');
+  };
+  el.querySelectorAll('#sQ,#sA,#sE,#sB,#sCrit').forEach(i => i.addEventListener('input', preview));
+  preview();
+  $s('#sOk').onclick = async () => {
+    const o = ler(), errs = EC.validarSimulado(o), msg = $s('#sMsg');
+    if (errs.length){ msg.textContent = errs[0]; msg.className = 'est-msg err'; return; }
+    let minutos = null; const tt = $s('#sT').value.trim();
+    if (tt){ minutos = EC.parseDuracao(tt); if (minutos == null){ msg.textContent = 'Não entendi o tempo (ex.: 3h ou 2h30).'; msg.className = 'est-msg err'; return; } }
+    const porMateria = [...el.querySelectorAll('.est-mat')].map(d => ({ materia: d.querySelector('.mm').value.trim(), questoes: Number(d.querySelector('.mq').value) || 0, acertos: Number(d.querySelector('.ma').value) || 0, erros: Number(d.querySelector('.me').value) || 0 })).filter(m => m.materia);
+    const reg = Object.assign({ id: s ? s.id : ED.novoId(), data: $s('#sData').value || estHoje(), concurso: $s('#sConc').value.trim(), banca: $s('#sBanca').value.trim(), criterioId: $s('#sCrit').value, observacao: $s('#sObs').value.trim(), porMateria }, o);
+    if (minutos != null) reg.minutos = minutos;
+    await ED.salvarSimulado(reg); fechar(); toast('Simulado salvo · nota ' + EC.notaSimulado(reg, criterios.find(c => c.id === reg.criterioId)).nota); estRender();
+  };
+}
+function estAbrirCriterios(){
+  const desenhar = () => {
+    const cs = ED.criterios();
+    box.querySelector('#crLista').innerHTML = cs.map(c => '<div class="est-h-row" data-id="' + esc(c.id) + '"><span class="m"><b>' + esc(c.nome) + '</b> — acerto +' + c.pontosAcerto + ' · erro −' + c.penalidadeErro + ' · branco ' + c.pontosBranco + '</span>' + (c.fixo ? '<span class="est-tag">padrão</span>' : '<button class="ib danger" data-excluir title="Excluir">🗑</button>') + '</div>').join('');
+    box.querySelectorAll('[data-excluir]').forEach(b => b.onclick = async () => { await ED.excluirSimulado(b.closest('[data-id]').dataset.id); desenhar(); });
+  };
+  const { el: box } = estModal('<div class="modal-head"><b>Critérios de pontuação</b><button class="ib" data-fechar>✕</button></div><div class="est-form"><div class="est-hist" id="crLista"></div>'
+    + '<h4 class="est-h4">Novo critério</h4><div class="est-linha2"><div class="est-campo"><label>Nome</label><input id="crNome" placeholder="ex.: FGV — sem penalidade"></div><div class="est-campo"><label>Pontos por acerto</label><input type="number" step="0.01" id="crA" value="1"></div><div class="est-campo"><label>Penalidade por erro</label><input type="number" step="0.01" min="0" id="crE" value="0"></div><div class="est-campo"><label>Pontos por branco</label><input type="number" step="0.01" id="crB" value="0"></div></div>'
+    + '<div class="est-row fim"><button class="btn-s primary" id="crAdd">Adicionar critério</button></div></div>', 'est-box');
+  box.querySelector('#crAdd').onclick = async () => {
+    const nome = box.querySelector('#crNome').value.trim(); if (!nome) return;
+    await ED.salvarSimulado({ id: ED.novoId(), tipoRegistro: 'criterio', nome, pontosAcerto: Number(box.querySelector('#crA').value) || 0, penalidadeErro: Number(box.querySelector('#crE').value) || 0, pontosBranco: Number(box.querySelector('#crB').value) || 0 });
+    box.querySelector('#crNome').value = ''; desenhar();
+  };
+  desenhar();
+}

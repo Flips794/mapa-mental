@@ -548,6 +548,36 @@ html[data-theme=dark] .mk.estudo{background:#2e1065;color:#ddd6fe}html[data-them
 .est-meta-bar i{display:block;height:100%;background:var(--ring);border-radius:3px}
 .est-pequeno{width:min(380px,100%)}
 
+/* Estudos: erros, simulados, gráficos */
+.est-filtros{display:flex;gap:8px;flex-wrap:wrap}
+.est-filtros select{height:32px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font-size:13px;padding:0 8px}
+.est-grade2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.est-barras{display:flex;flex-direction:column;gap:6px;padding:4px 10px 8px}
+.est-barra{display:grid;grid-template-columns:minmax(90px,38%) 1fr auto;align-items:center;gap:8px;font-size:12.5px}
+.est-barra .rot{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.est-barra .trilho{height:10px;background:var(--hover);border-radius:5px;overflow:hidden}
+.est-barra .trilho i{display:block;height:100%;background:var(--ring);border-radius:5px}
+.est-barra b{font-size:12px;white-space:nowrap}
+.est-barra b small{color:var(--muted);font-weight:400}
+.est-tag{font-size:10.5px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:1px 6px;white-space:nowrap}
+.est-hist.sem-borda{border:0;max-height:none}
+.est-hist.sem-borda .est-h-row .t{width:130px;color:var(--ink)}
+.est-evol{display:flex;align-items:flex-end;gap:6px;height:170px;padding:10px 10px 4px;overflow-x:auto}
+.est-evol-col{flex:0 0 42px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px}
+.est-evol-col i{width:24px;background:var(--ring);border-radius:4px 4px 0 0}
+.est-evol-col i.neg{background:var(--danger)}
+.est-evol-col span{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.est-tabela{overflow-x:auto;padding:0 6px}
+.est-tabela table{width:100%;border-collapse:collapse;font-size:12.5px}
+.est-tabela th{text-align:left;font-weight:600;color:var(--muted);padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.est-tabela td{padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.est-tabela td .ib{height:24px;min-width:24px;padding:0 3px}
+.est-nota{font-size:13px;color:var(--muted)}
+.est-nota b{color:var(--ink);font-size:15px}
+.est-nota .err{color:var(--danger)}
+.est-mat{margin:6px 0}
+.est-mat input{flex:1}
+
 @media(max-width:760px){
   #panel{position:fixed;left:0;right:0;bottom:0;height:48vh;border-left:0;border-top:1px solid var(--line);z-index:30;box-shadow:0 -8px 24px rgba(0,0,0,.1)}
   #sidebar{position:fixed;left:0;top:46px;bottom:0;z-index:40;box-shadow:8px 0 24px rgba(0,0,0,.1)}
