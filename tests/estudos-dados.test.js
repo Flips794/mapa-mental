@@ -156,3 +156,15 @@ test('critério próprio fica junto, mas fora da lista de simulados', async () =
   assert.deepEqual(a.simulados().map(s => s.id), ['sm1']);
   assert.deepEqual(a.criterios().map(c => c.id), ['cebraspe', 'simples', 'cr']);
 });
+
+test('depois de sincronizar com sucesso, deixa de indicar "sem conexão"', async () => {
+  const store = storeFalso(), local = localFalso();
+  const a = criar(store, local); await a.carregar();
+  await a.salvarSessao(sessao());
+  store.falharLeitura = true;
+  const b = criar(store, local); await b.carregar();
+  assert.equal(b.estaOffline(), true);
+  store.falharLeitura = false;
+  assert.equal(await b.sincronizar(), true);
+  assert.equal(b.estaOffline(), false);
+});

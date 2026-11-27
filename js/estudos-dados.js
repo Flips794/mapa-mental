@@ -62,6 +62,7 @@ function EstDadosCriar(opts){
   async function sincronizar(){
     const lista = [...pend];
     const r = await Promise.all(lista.map(k => (filas.get(k) || Promise.resolve()).then(() => pend.has(k) ? enviar(k) : true)));
+    if (r.every(Boolean) && !pend.size) offline = false;   // tudo lido e confirmado de novo no armazenamento principal
     return r.every(Boolean);
   }
 
