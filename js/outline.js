@@ -497,3 +497,52 @@ async function importTextMap(text){
 })();
 
 setPanelTab(panelTab);
+
+/* ---------- Backup de tudo (mapas + documentos + PDFs) ---------- */
+function abToB64(buf){ let s=''; const u=new Uint8Array(buf); for(let i=0;i<u.length;i+=0x8000) s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000)); return btoa(s); }
+function b64ToAb(b){ const s=atob(b); const u=new Uint8Array(s.length); for(let i=0;i<s.length;i++) u[i]=s.charCodeAt(i); return u.buffer; }
+const SAFE_ID=/^[A-Za-z0-9_-]{1,80}$/;
+async function exportAll(){
+  await mapFlush(); await docFlush();
+  setStatus('Preparando backup…');
+  const out={format:'mapa-mental-backup', version:1, exported:new Date().toISOString(), items:[], maps:{}, docs:{}, pdfs:{}};
+  for(const it of ws.items){
+    if(it.type==='map'){ const d=await Store.get('map:'+it.id); if(d){ out.items.push(it); out.maps[it.id]=d; } }
+    else if(it.type==='doc'){
+      const d=await Store.get('doc:'+it.id); if(!d) continue;
+      out.items.push(it); out.docs[it.id]=d;
+      for(const pid of (it.pdfs||[])){ if(out.pdfs[pid]) continue; const b=await Store.get('pdf:'+pid); if(b) out.pdfs[pid]=abToB64(b); }
+    }
+  }
+  const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download='mapa-mental-tudo-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  setStatus('Pronto ✓');
+  toast('Backup de tudo exportado: '+out.items.length+' itens.');
+}
+async function importBackup(obj){
+  await mapFlush(); await docFlush();
+  let added=0, skipped=0;
+  const have=new Set(ws.items.map(i=>i.id));
+  for(const it of (Array.isArray(obj.items)?obj.items:[])){
+    if(!it || typeof it.id!=='string' || !SAFE_ID.test(it.id) || (it.type!=='map' && it.type!=='doc')) continue;
+    if(have.has(it.id)){ skipped++; continue; }
+    if(it.type==='map'){
+      const d=obj.maps && obj.maps[it.id]; if(!d || !d.root) continue;
+      const m=normalizeMap(d);
+      if(!await Store.set('map:'+it.id,m)) continue;
+      ws.items.push({id:it.id, type:'map', title:mapTitle(m), updated:Date.now()});
+    } else {
+      const d=obj.docs && obj.docs[it.id]; if(!d || !Array.isArray(d.pages)) continue;
+      const pdfs=(Array.isArray(it.pdfs)?it.pdfs:[]).filter(p=>typeof p==='string' && SAFE_ID.test(p));
+      for(const pid of pdfs){ const b=obj.pdfs && obj.pdfs[pid]; if(typeof b==='string') await Store.set('pdf:'+pid, b64ToAb(b)); }
+      if(!await Store.set('doc:'+it.id,d)) continue;
+      ws.items.push(Object.assign({id:it.id, type:'doc', title:String(it.title||d.title||'Documento'), updated:Date.now(), pdfs}, docMeta({title:d.title, pages:d.pages})));
+    }
+    have.add(it.id); added++;
+  }
+  await wsSave(); renderSidebar();
+  if(Store.mode==='server') buildMissingMirrors();
+  toast(added+' item(ns) importado(s)'+(skipped?' · '+skipped+' já existiam e foram mantidos':''));
+}

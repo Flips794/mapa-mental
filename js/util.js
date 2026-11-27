@@ -12,8 +12,64 @@ function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;'
 function textToHtml(s){ return esc(s||'').replace(/\n/g,'<br>'); }
 function fmtSize(b){ if(!b) return ''; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(0)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
-/* ---------- Armazenamento chave/valor (IndexedDB, com fallback localStorage) ---------- */
+/* ---------- Armazenamento chave/valor ----------
+   Aberto pelo servidor local (http://localhost:4580): tudo fica nos arquivos do servidor,
+   igual em qualquer navegador. Aberto de outro jeito (GitHub Pages, arquivo): IndexedDB do navegador. */
 const Store = (()=>{
+  const local = LocalStore();
+  let mode=null;   // 'server' | 'local'
+  const ready=(async()=>{
+    if(/^https?:$/.test(location.protocol) && !/github\.io$/i.test(location.hostname)){
+      try{
+        const r=await fetch('api/health',{cache:'no-store'});
+        if(r.ok){ const j=await r.json(); if(j && j.app==='mapa-mental'){ mode='server'; return; } }
+      }catch(e){}
+    }
+    mode='local';
+  })();
+  const H={'X-Mapa-Mental':'1'};
+  const url=k=>'api/kv/'+encodeURIComponent(k);
+  return {
+    ready,
+    get mode(){ return mode; },
+    /* no modo servidor, erro de rede LANÇA exceção (nunca finge que está vazio) */
+    async get(k){
+      await ready;
+      if(mode!=='server') return local.get(k);
+      const r=await fetch(url(k),{cache:'no-store'});
+      if(r.status===404) return undefined;
+      if(!r.ok) throw new Error('Servidor respondeu '+r.status);
+      return /^pdf:/.test(k) ? r.arrayBuffer() : r.json();
+    },
+    async set(k,v){
+      await ready;
+      if(mode!=='server') return local.set(k,v);
+      const bin=v instanceof ArrayBuffer;
+      const body=bin?v:JSON.stringify(v);
+      try{
+        const r=await fetch(url(k),{method:'PUT',headers:Object.assign({'Content-Type':bin?'application/octet-stream':'application/json'},H),body,keepalive:!bin && body.length<60000});
+        return r.ok;
+      }catch(e){ return false; }
+    },
+    async del(k){
+      await ready;
+      if(mode!=='server') return local.del(k);
+      try{ await fetch(url(k),{method:'DELETE',headers:H}); }catch(e){}
+    },
+    /* cópia legível do mapa em dados/texto/ */
+    async setText(id,title,text){
+      await ready; if(mode!=='server') return;
+      try{ await fetch('api/md/'+encodeURIComponent(id),{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},H),body:JSON.stringify({title,text})}); }catch(e){}
+    },
+    async textIds(){
+      await ready; if(mode!=='server') return [];
+      try{ const r=await fetch('api/md',{cache:'no-store'}); return r.ok ? (await r.json()).ids||[] : []; }catch(e){ return []; }
+    },
+    local
+  };
+})();
+
+function LocalStore(){
   const DB='mapa_mental_db', ST='kv'; let dbP=null;
   function open(){
     if(dbP) return dbP;
@@ -47,9 +103,10 @@ const Store = (()=>{
     async del(k){
       try{ await req('readwrite',st=>st.delete(k)); }catch(e){}
       try{ localStorage.removeItem(lsKey(k)); }catch(e){}
-    }
+    },
+    async keys(){ try{ return await req('readonly',st=>st.getAllKeys()); }catch(e){ return []; } }
   };
-})();
+}
 
 /* ---------- HTML seguro ---------- */
 const DROP_TAGS = new Set(['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','TEMPLATE','NOSCRIPT','SVG','MATH','HEAD','TITLE','META','LINK','IMG','VIDEO','AUDIO','CANVAS','INPUT','BUTTON','SELECT','TEXTAREA','FORM','FRAME','FRAMESET','BASE']);
@@ -144,7 +201,7 @@ function showLightbox(src){ const lb=$('#lightbox'); lb.querySelector('img').src
 $('#lightbox').addEventListener('click',()=>{ $('#lightbox').style.display='none'; });
 function download(a){ const l=document.createElement('a'); l.href=a.dataUrl; l.download=a.name; document.body.appendChild(l); l.click(); l.remove(); }
 function setStatus(t){ $('#status').textContent=t; }
-function savedStatus(ok){ const t=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); setStatus(ok?('Salvo ✓ '+t):'⚠ Falha ao salvar'); }
+function savedStatus(ok){ const t=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); setStatus(ok?('Salvo ✓ '+t+(Store.mode==='server'?'':' (só neste navegador)')):(Store.mode==='server'?'⚠ Servidor fora do ar — não salvou':'⚠ Falha ao salvar')); }
 
 /* menu flutuante simples: items = [{label, danger, fn}] */
 let openMenuEl=null;

@@ -383,6 +383,13 @@ html[data-theme=dark] .ai-preview.ok{color:#4ade80}
 .ai-preview.err{color:var(--danger)}
 .btn-s:disabled{opacity:.45;cursor:default}
 
+/* aviso da versão online (GitHub Pages) */
+.online-banner{flex:0 0 auto;display:block;position:relative;padding:7px 40px 7px 14px;line-height:1.45;font-size:12.5px;background:#fef3c7;color:#78350f;border-bottom:1px solid #fcd34d}
+.online-banner a{color:#92400e;font-weight:700}
+.online-banner button{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:0;background:transparent;color:inherit;cursor:pointer;font-size:14px}
+html[data-theme=dark] .online-banner{background:#3a2e0b;color:#fde68a;border-color:#5c4813}
+html[data-theme=dark] .online-banner a{color:#fcd34d}
+
 @media(max-width:760px){
   #panel{position:fixed;left:0;right:0;bottom:0;height:48vh;border-left:0;border-top:1px solid var(--line);z-index:30;box-shadow:0 -8px 24px rgba(0,0,0,.1)}
   #sidebar{position:fixed;left:0;top:46px;bottom:0;z-index:40;box-shadow:8px 0 24px rgba(0,0,0,.1)}

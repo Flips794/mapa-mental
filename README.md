@@ -2,7 +2,30 @@
 
 Mapas mentais e documentos **100% no navegador**. Sem login, sem servidor, sem mensalidade: tudo fica salvo no seu computador.
 
-🌐 **Acesse:** https://flips794.github.io/mapa-mental/
+🏠 **Seu endereço:** http://localhost:4580 — servidor neste computador; os dados ficam na pasta `dados/` e são os mesmos em qualquer navegador.
+🌐 **Demonstração online:** https://flips794.github.io/mapa-mental/ (lá os dados ficam só no navegador).
+
+## 🖥️ Servidor local (armazenamento único)
+
+```bash
+bash server/instalar-servico.sh     # instala e liga (inicia sozinho ao entrar no computador)
+systemctl --user status mapa-mental # ver se está rodando
+journalctl --user -u mapa-mental    # ver o registro
+systemctl --user disable --now mapa-mental   # desligar
+```
+
+Sem instalar: `node server/server.js` e abra http://localhost:4580.
+
+| Pasta | Conteúdo |
+|---|---|
+| `dados/ws.json` | lista de mapas e documentos |
+| `dados/mapas/` | cada mapa (com anexos) |
+| `dados/documentos/`, `dados/pdfs/` | documentos e PDFs originais |
+| `dados/texto/` | cópia legível `.md` de cada mapa (atualizada a cada salvamento; editar ali não altera o mapa) |
+
+Faça backup copiando a pasta `dados/`, ou pelo app: **Exportar → Tudo**. Para trazer dados de outro navegador: abra o app nele, **Exportar → Tudo**, e depois **Importar** esse arquivo em http://localhost:4580.
+
+O servidor só aceita conexões deste computador.
 
 ## ✨ Funcionalidades
 
@@ -81,6 +104,7 @@ js/map.js           editor de mapa mental
 js/docs.js          editor de documentos / PDF
 js/outline.js       formato de texto do mapa, painel Texto e IA
 js/app.js           barra lateral, modos e inicialização
+server/server.js    servidor local (Node, sem dependências) + instalar-servico.sh
 vendor/pdfjs/       PDF.js 3.11.174 (Mozilla, Apache 2.0) para ler PDFs
 ```
 

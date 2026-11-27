@@ -842,6 +842,15 @@ async function saveNow(){
   const it=ws.items.find(i=>i.id===curMapId);
   if(it){ const t=mapTitle(); const changed=it.title!==t; it.title=t; it.updated=Date.now(); await wsSave(); if(changed) renderSidebar(); }
   savedStatus(ok);
+  scheduleMirror();
+}
+/* cópia legível em dados/texto/ (só no modo servidor), sem pesar a digitação */
+let mirrorTimer=null;
+function scheduleMirror(){
+  if(Store.mode!=='server') return;
+  clearTimeout(mirrorTimer);
+  const id=curMapId;
+  mirrorTimer=setTimeout(()=>{ if(M && curMapId===id) Store.setText(id, mapTitle(), mapToText().text); },1500);
 }
 window.addEventListener('pagehide',()=>{ if(M && curMapId) Store.set('map:'+curMapId, persistable()); });
 
@@ -857,7 +866,8 @@ $('#exportBtn').addEventListener('click',e=>{
   const r=e.currentTarget.getBoundingClientRect();
   showMenu(r.left, r.bottom+4, [
     {label:'📝  Texto (.md) — para ler e usar com IA', fn:exportMd},
-    {label:'🗄  Backup completo (.json) — inclui anexos', fn:exportJson},
+    {label:'🗄  Backup deste mapa (.json) — inclui anexos', fn:exportJson},
+    {label:'📦  Tudo (.json) — todos os mapas, documentos e PDFs', fn:exportAll},
   ]);
 });
 $('#importBtn').addEventListener('click',()=>$('#importFile').click());
@@ -865,7 +875,7 @@ $('#importBtn').addEventListener('click',()=>$('#importFile').click());
 $('#importFile').addEventListener('change',async e=>{
   const files=[...e.target.files]; e.target.value='';
   if(!files.length) return;
-  let ok=0; const bad=[];
+  let ok=0, backups=0; const bad=[];
   for(const file of files){
     const raw=await file.text().catch(()=>'');
     try{
@@ -875,6 +885,7 @@ $('#importFile').addEventListener('change',async e=>{
         await createMapFromRoot(buildFromParsed(res,null).root);
       } else {
         const parsed=JSON.parse(raw);
+        if(parsed && parsed.format==='mapa-mental-backup'){ await importBackup(parsed); backups++; continue; }
         if(!parsed || !parsed.root || typeof parsed.root!=='object') throw new Error('formato');
         const nd=normalizeMap(parsed);
         await mapFlush();
@@ -887,6 +898,7 @@ $('#importFile').addEventListener('change',async e=>{
       ok++;
     }catch(err){ bad.push(file.name); }
   }
+  if(backups && !ok && !bad.length) return;
   toast(ok ? (ok===1 ? 'Mapa importado como um novo mapa!' : ok+' mapas importados!')+(bad.length?' · falharam: '+bad.join(', '):'') : 'Arquivo inválido.');
 });
 
