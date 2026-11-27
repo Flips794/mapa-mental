@@ -64,3 +64,67 @@ test('cronômetro recusa transições inválidas', () => {
   assert.equal(C.cronoDuracaoMs(fim, ms('2026-11-27T11:00:00')), 5 * 60000);   // pausado até o fim não conta
   assert.equal(C.cronoEstado(null), 'parado');
 });
+
+/* ---------- Task 2: coleções com histórico e mescla ---------- */
+const T1 = '2026-11-27T10:00:00.000Z', T2 = '2026-11-27T11:00:00.000Z', T3 = '2026-11-27T12:00:00.000Z';
+
+test('salvar o mesmo registro duas vezes não duplica nem cria versão', () => {
+  let col = C.colecao();
+  col = C.salvarRegistro(col, { id: 's1', questoes: { feitas: 10, acertos: 8 } }, T1);
+  col = C.salvarRegistro(col, { id: 's1', questoes: { feitas: 10, acertos: 8 } }, T2);
+  assert.equal(Object.keys(col.registros).length, 1);
+  assert.deepEqual(col.registros.s1.versoes || [], []);
+  assert.equal(col.registros.s1.criadoEm, T1);
+  assert.equal(col.registros.s1.atualizadoEm, T1);
+});
+
+test('editar guarda a versão anterior e mantém criadoEm', () => {
+  let col = C.salvarRegistro(C.colecao(), { id: 's1', questoes: { feitas: 10, acertos: 8 } }, T1);
+  col = C.salvarRegistro(col, { id: 's1', questoes: { feitas: 10, acertos: 9 } }, T2);
+  const r = col.registros.s1;
+  assert.equal(r.questoes.acertos, 9);
+  assert.equal(r.criadoEm, T1);
+  assert.equal(r.atualizadoEm, T2);
+  assert.equal(r.versoes.length, 1);
+  assert.equal(r.versoes[0].questoes.acertos, 8);
+  assert.equal(r.versoes[0].em, T2);
+  assert.equal(r.versoes[0].versoes, undefined);
+});
+
+test('excluir marca como excluída e some dos registros ativos', () => {
+  let col = C.salvarRegistro(C.colecao(), { id: 'a' }, T1);
+  col = C.salvarRegistro(col, { id: 'b' }, T1);
+  col = C.excluirRegistro(col, 'a', T2);
+  assert.equal(col.registros.a.excluida, true);
+  assert.equal(col.registros.a.excluidaEm, T2);
+  assert.deepEqual(C.registrosAtivos(col).map(r => r.id), ['b']);
+});
+
+test('mescla junta aparelhos: mais recente vence e exclusão não é desfeita', () => {
+  let a = C.salvarRegistro(C.colecao(), { id: 'x', v: 1 }, T1);
+  a = C.salvarRegistro(a, { id: 'soA' }, T1);
+  let b = C.salvarRegistro(C.colecao(), { id: 'x', v: 1 }, T1);
+  b = C.salvarRegistro(b, { id: 'x', v: 2 }, T2);           // B editou depois
+  b = C.salvarRegistro(b, { id: 'soB' }, T1);
+  let a2 = C.excluirRegistro(a, 'soA', T1);
+  let b2 = C.salvarRegistro(b, { id: 'soA', velho: true }, T1); // B tem uma cópia antiga de soA
+  b2 = C.salvarRegistro(b2, { id: 'soA', velho: true, mexido: 1 }, T3); // mais nova, mas A excluiu
+  const m = C.mesclarColecoes(a2, b2);
+  assert.equal(m.registros.x.v, 2);
+  assert.ok(m.registros.soB);
+  assert.equal(m.registros.soA.excluida, true);
+  assert.deepEqual(C.registrosAtivos(m).map(r => r.id).sort(), ['soB', 'x']);
+  const m2 = C.mesclarColecoes(b2, a2);
+  assert.deepEqual(JSON.parse(JSON.stringify(m2)), JSON.parse(JSON.stringify(m)));
+});
+
+test('mescla une o histórico de versões sem repetir', () => {
+  let a = C.salvarRegistro(C.colecao(), { id: 'x', v: 1 }, T1);
+  a = C.salvarRegistro(a, { id: 'x', v: 2 }, T2);
+  let b = JSON.parse(JSON.stringify(a));
+  b = C.salvarRegistro(b, { id: 'x', v: 3 }, T3);
+  const m = C.mesclarColecoes(a, b);
+  assert.equal(m.registros.x.v, 3);
+  assert.deepEqual(m.registros.x.versoes.map(v => v.v), [1, 2]);
+  assert.equal(C.mesclarColecoes(null, a).registros.x.v, 2);
+});

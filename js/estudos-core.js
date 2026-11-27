@@ -80,8 +80,62 @@ function cronoDuracaoMs(c, agoraMs){
 }
 function cronoDataInicio(c){ return c && c.eventos && c.eventos.length ? fmt(new Date(c.eventos[0].em)) : null; }
 
+/* ---------- Coleções {versao, registros:{id: registro}} — nada é apagado de verdade ---------- */
+const META = new Set(['criadoEm', 'atualizadoEm', 'versoes', 'excluida', 'excluidaEm']);
+function estavel(v){
+  if (Array.isArray(v)) return '[' + v.map(estavel).join(',') + ']';
+  if (v && typeof v === 'object') return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + estavel(v[k])).join(',') + '}';
+  return JSON.stringify(v === undefined ? null : v);
+}
+function conteudo(r){ const o = {}; for (const k of Object.keys(r || {})) if (!META.has(k)) o[k] = r[k]; return o; }
+function colecao(){ return { versao: 1, registros: {} }; }
+function salvarRegistro(col, reg, agoraISO){
+  col = col || colecao();
+  const atual = col.registros[reg.id];
+  const novoConteudo = conteudo(reg);
+  if (atual && estavel(conteudo(atual)) === estavel(novoConteudo)) return col;   // idêntico: nada muda
+  const r = Object.assign({}, novoConteudo, {
+    criadoEm: atual ? atual.criadoEm : (reg.criadoEm || agoraISO),
+    atualizadoEm: agoraISO,
+    versoes: atual ? (atual.versoes || []).concat([Object.assign(conteudo(atual), { criadoEm: atual.criadoEm, atualizadoEm: atual.atualizadoEm, em: agoraISO })]) : [],
+  });
+  if (atual && atual.excluida){ r.excluida = true; r.excluidaEm = atual.excluidaEm; }
+  return { versao: col.versao || 1, registros: Object.assign({}, col.registros, { [reg.id]: r }) };
+}
+function excluirRegistro(col, id, agoraISO){
+  const atual = col && col.registros[id];
+  if (!atual || atual.excluida) return col;
+  return { versao: col.versao || 1, registros: Object.assign({}, col.registros, { [id]: Object.assign({}, atual, { excluida: true, excluidaEm: agoraISO, atualizadoEm: agoraISO }) }) };
+}
+function registrosAtivos(col){ return col ? Object.values(col.registros).filter(r => !r.excluida) : []; }
+function mesclarRegistro(a, b){
+  const ta = a.atualizadoEm || '', tb = b.atualizadoEm || '';
+  const vence = ta > tb ? a : tb > ta ? b : (estavel(a) >= estavel(b) ? a : b);
+  const r = Object.assign({}, vence);
+  const vistos = new Map();
+  for (const v of (a.versoes || []).concat(b.versoes || [])) vistos.set((v.em || '') + estavel(conteudo(v)), v);
+  r.versoes = [...vistos.entries()].sort((x, y) => x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0).map(e => e[1]);
+  if (a.excluida || b.excluida){
+    r.excluida = true;
+    r.excluidaEm = [a.excluidaEm, b.excluidaEm].filter(Boolean).sort().pop() || r.atualizadoEm;
+  }
+  return r;
+}
+function mesclarColecoes(a, b){
+  if (!a) return b ? JSON.parse(JSON.stringify(b)) : colecao();
+  if (!b) return JSON.parse(JSON.stringify(a));
+  const ids = [...new Set(Object.keys(a.registros || {}).concat(Object.keys(b.registros || {})))].sort();
+  const registros = {};
+  for (const id of ids){
+    const ra = a.registros[id], rb = b.registros[id];
+    registros[id] = ra && rb ? mesclarRegistro(ra, rb) : JSON.parse(JSON.stringify(ra || rb));
+  }
+  return { versao: Math.max(a.versao || 1, b.versao || 1), registros };
+}
+
 const api = {
   AJUSTES_PADRAO,
+  colecao, salvarRegistro, excluirRegistro, registrosAtivos, mesclarColecoes, estavel,
   hoje, addDias, diffDias, mesDe, inicioSemana, parseDuracao,
   cronoIniciar, cronoAplicar, cronoEstado, cronoDuracaoMs, cronoDataInicio,
   _hoje: null,
