@@ -19,8 +19,11 @@ consultar** e conferindo se está completo; faz **questões**; marca o que estud
 
 ## 2. Etapas (aprovadas, nesta ordem)
 
-Cada etapa é concluída, testada e validada pelo usuário antes de a próxima começar. A estrutura de
-dados nasce preparada para as quatro; só as funcionalidades da etapa em curso são construídas.
+**Decisão de execução (atualizada pelo usuário, 2026-11-27): as quatro etapas são construídas juntas,
+entregando o sistema completo**, de forma integrada (sem módulos isolados ou redundantes), com testes
+automatizados por módulo e de integração entre eles. As regras e cuidados deste documento valem para
+todas as etapas. As seções 3, 7 e 8 detalham a Etapa 1; as Etapas 2–4 seguem o resumo da tabela abaixo e
+os dados da seção 9.
 
 | Etapa | Conteúdo |
 |---|---|
