@@ -816,3 +816,150 @@ function estAbrirCriterios(){
   };
   desenhar();
 }
+
+/* =========================================================
+   Desempenho
+   ========================================================= */
+EST_VIEWS.desempenho = function(body){
+  const per = estUi.periodo, hojeS = estHoje();
+  const todasS = ED.todas('sessoes'), todosSim = ED.simulados(), itens = ED.todas('itens');
+  let de = desdePeriodo(per);
+  if (!per){ const datas = todasS.map(s => s.data).concat(todosSim.map(s => s.data)).sort(); de = datas[0] || hojeS; }
+  const noPer = (x) => x.data >= de && x.data <= hojeS;
+  const ss = todasS.filter(noPer), sims = todosSim.filter(noPer);
+  const aj = ajustes(), ag = estAgenda();
+  const totMin = ss.reduce((t, s) => t + (s.minutos || 0), 0) + sims.reduce((t, s) => t + (s.minutos || 0), 0);
+  const totQ = ss.reduce((t, s) => t + ((s.questoes && s.questoes.feitas) || 0), 0) + sims.reduce((t, s) => t + (s.questoes || 0), 0);
+  const totA = ss.reduce((t, s) => t + Math.min((s.questoes && s.questoes.acertos) || 0, (s.questoes && s.questoes.feitas) || 0), 0) + sims.reduce((t, s) => t + (s.acertos || 0), 0);
+  const tmq = EC.tempoMedioPorQuestao(ss, sims);
+  const pendentes = ag.atrasadas.length + ag.hoje.length;
+  const estados = ag.estados;
+  const criticos = [...estados.values()].filter(e => e.status === 'retomada' || (e.dominio && e.dominio.suficiente && e.dominio.categoria === 'critico')).length;
+  const prod = EC.produtividade(todasS, de, hojeS);
+  // barras por dia: no máximo 90 colunas
+  const deSerie = EC.diffDias(de, hojeS) > 89 ? EC.addDias(hojeS, -89) : de;
+  const serie = EC.serieDiaria(todasS, todosSim, deSerie, hojeS);
+  const maxMin = Math.max(1, ...serie.map(d => d.minutos)), maxQ = Math.max(1, ...serie.map(d => d.questoes));
+  const mats = EC.porMateria(itens, ss, aj, hojeS);
+  const assuntos = EC.porAssunto(itens, ss, aj, hojeS).map(a => Object.assign(a, { estadoGeral: estados.get(a.item.id) || a.estado })).sort((a, b) => b.minutos - a.minutos || b.questoes - a.questoes);
+  const evol = EC.evolucaoMensal(todasS, todosSim);
+  const fracos = EC.pontosFracos(itens, estados, EC.estatisticasErros(ED.todas('erros'), itens)).slice(0, 8);
+  const card = (rot, val, sub) => '<div class="est-card"><span>' + rot + '</span><b>' + val + '</b>' + (sub ? '<small>' + sub + '</small>' : '') + '</div>';
+  body.innerHTML = '<div class="est-hoje est-largo"><div class="est-nav"><h2 class="est-h2">Desempenho</h2><div class="spacer"></div><div class="est-seg" id="dPer">' + [[7, '7 dias'], [30, '30 dias'], [90, '90 dias'], [0, 'Tudo']].map(([v, t]) => '<button data-v="' + v + '" class="' + (per === v ? 'on' : '') + '">' + t + '</button>').join('') + '</div></div>'
+    + '<div class="est-cards">'
+    + card('Horas estudadas', fmtMin(totMin), ss.length + ' sessão(ões)' + (sims.length ? ' · ' + sims.length + ' simulado(s)' : ''))
+    + card('Questões', totQ, totQ ? totA + ' acertos' : 'nenhuma no período')
+    + card('Taxa de acerto', totQ ? pct(totA, totQ) + '%' : '—', totQ ? (totQ - totA) + ' erros' : '')
+    + card('Tempo por questão', tmq != null ? tmq + 's' : '—', tmq != null ? 'só sessões com tempo e questões' : 'registre o tempo para medir')
+    + card('Revisões pendentes', pendentes, ag.atrasadas.length ? ag.atrasadas.length + ' atrasada(s)' : 'em dia')
+    + card('Assuntos críticos', criticos, ag.retomar.length ? ag.retomar.length + ' para estudar de novo' : '')
+    + '</div>'
+    + '<section class="est-sec"><h3>Por dia <span class="est-leg"><i class="lm"></i>tempo <i class="lq"></i>questões</span></h3><div class="est-dias">' + serie.map(d => '<div class="est-bar-dia" title="' + fmtData(d.data, true) + ' · ' + fmtMin(d.minutos) + ' · ' + d.questoes + ' questões' + (d.questoes ? ' (' + pct(d.acertos, d.questoes) + '%)' : '') + '"><div class="pr"><i class="lm" style="height:' + Math.round(d.minutos / maxMin * 100) + '%"></i><i class="lq" style="height:' + Math.round(d.questoes / maxQ * 100) + '%"></i></div><span>' + (serie.length <= 31 || d.data.endsWith('-01') || d.data === hojeS ? Number(d.data.slice(8)) : '') + '</span></div>').join('') + '</div>'
+    + '<div class="est-prod">Dias estudados: <b>' + prod.diasEstudados + '</b> de ' + (EC.diffDias(de, hojeS) + 1) + ' · média <b>' + fmtMin(prod.mediaMinutosDia) + '</b>/dia · sequência atual <b>' + prod.sequenciaAtual + '</b> dia(s)</div></section>'
+    + (mats.length ? '<div class="est-grade2"><section class="est-sec"><h3>Horas por matéria</h3><div id="dMatH"></div></section><section class="est-sec"><h3>Acertos por matéria</h3><div id="dMatA"></div></section></div>' : '')
+    + (fracos.length ? '<section class="est-sec"><h3>Pontos fracos</h3><div class="est-hist sem-borda" id="dFracos"></div></section>' : '')
+    + (assuntos.length ? '<section class="est-sec"><h3>Por assunto (' + assuntos.length + ')</h3><div class="est-tabela"><table><thead><tr><th>Assunto</th><th>Tempo</th><th>Questões</th><th>Acerto</th><th>Domínio</th><th>Retenção</th><th>Próxima</th></tr></thead><tbody id="dAss"></tbody></table></div></section>' : '')
+    + (evol.length ? '<section class="est-sec"><h3>Evolução mensal</h3><div class="est-tabela"><table><thead><tr><th>Mês</th><th>Tempo</th><th>Questões</th><th>Acerto</th></tr></thead><tbody>' + evol.slice().reverse().map(m => { const [a, mm] = m.mes.split('-'); return '<tr><td>' + ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(mm) - 1] + ' ' + a + '</td><td>' + fmtMin(m.minutos) + '</td><td>' + m.questoes + '</td><td>' + (m.questoes ? pct(m.acertos, m.questoes) + '%' : '—') + '</td></tr>'; }).join('') + '</tbody></table></div></section>' : '')
+    + (!ss.length && !sims.length ? '<div class="est-vazio">Nada registrado neste período ainda. Os números aparecem conforme você registra estudos, revisões e simulados.</div>' : '')
+    + '</div>';
+  body.querySelectorAll('#dPer button').forEach(b => b.onclick = () => { estUi.periodo = Number(b.dataset.v); estRender(); });
+  if (mats.length){
+    const ph = mats.map(m => [m.materia, m.minutos]), pa = mats.filter(m => m.questoes).map(m => [m.materia + ' (' + m.questoes + ' q.)', pct(m.acertos, m.questoes)]);
+    body.querySelector('#dMatH').innerHTML = barrasHtml(ph, 0, fmtMin); preencherRotulos(body.querySelector('#dMatH'), ph);
+    const box = body.querySelector('#dMatA');
+    if (pa.length){ box.innerHTML = barrasHtml(pa, 0, v => v + '%'); preencherRotulos(box, pa); box.querySelectorAll('.trilho i').forEach((i, k) => { i.style.width = pa[k][1] + '%'; }); }
+    else box.innerHTML = '<div class="est-pequeno">Sem questões no período.</div>';
+  }
+  if (fracos.length){
+    const box = body.querySelector('#dFracos');
+    box.innerHTML = fracos.map(f => '<div class="est-h-row clicavel" data-id="' + esc(f.item.id) + '"><span class="m"></span><span class="est-tag">' + esc(f.motivos.join(' · ')) + '</span></div>').join('');
+    box.querySelectorAll('.est-h-row').forEach((r, k) => { r.querySelector('.m').textContent = fracos[k].item.caminho; r.onclick = () => estAbrirAssunto(fracos[k].item.id); });
+  }
+  if (assuntos.length){
+    const tb = body.querySelector('#dAss');
+    tb.innerHTML = assuntos.map(a => { const e = a.estadoGeral; return '<tr class="clicavel" data-id="' + esc(a.item.id) + '"><td class="nome"></td><td>' + fmtMin(a.minutos) + '</td><td>' + a.questoes + '</td><td>' + (a.questoes ? pct(a.acertos, a.questoes) + '%' : '—') + '</td><td>' + badgeMetrica(e.dominio, 'Domínio') + '</td><td>' + badgeMetrica(e.retencao, 'Retenção') + '</td><td>' + (e.status === 'retomada' ? 'estudar de novo' : e.proxima ? fmtRel(e.proxima) : '—') + '</td></tr>'; }).join('');
+    tb.querySelectorAll('tr').forEach((tr, k) => { const td = tr.querySelector('.nome'); td.textContent = assuntos[k].item.caminho; td.title = assuntos[k].item.caminho; tr.onclick = () => estAbrirAssunto(assuntos[k].item.id); });
+  }
+};
+
+/* =========================================================
+   Ajustes
+   ========================================================= */
+const AJ_CAMPOS = [
+  ['Revisões', [
+    ['escada', 'Escada de revisões (dias)', 'lista', 'Intervalos padrão, separados por vírgula'],
+    ['degrauExtra', 'Degrau extra para domínio consolidado (dias)', 'int'],
+    ['fatorDificil', 'Fator para assuntos difíceis', 'num', 'Multiplica cada intervalo (ex.: 0,7 deixa as revisões mais próximas)'],
+    ['limiarBom', 'Resultado bom a partir de (%)', 'pct'],
+    ['limiarBaixo', 'Resultado baixo abaixo de (%)', 'pct'],
+    ['dominioConsolidado', 'Domínio consolidado a partir de (%)', 'int'],
+    ['dominioEsquecimento', 'Domínio mínimo para tratar queda como esquecimento (%)', 'int'],
+    ['recorrenteN', 'Revisões baixas seguidas para recomendar estudar de novo', 'int'],
+  ]],
+  ['Domínio e retenção', [
+    ['categorias.excelente', 'Excelente a partir de (%)', 'int'],
+    ['categorias.bom', 'Bom a partir de (%)', 'int'],
+    ['categorias.regular', 'Regular a partir de (%)', 'int'],
+    ['minQuestoes', 'Mínimo de questões para classificar o domínio', 'int'],
+    ['minAvaliadas', 'Mínimo de sessões avaliadas para classificar', 'int'],
+    ['minRevisoesRetencao', 'Mínimo de revisões para classificar a retenção', 'int'],
+    ['meiaVidaDias', 'Peso de recência: meia-vida (dias)', 'int', 'Sessões mais antigas que isso valem metade no domínio'],
+    ['pesoDominioQuestoes', 'Peso das questões no domínio', 'num'],
+    ['pesoDominioExplicacao', 'Peso da explicação sem consulta no domínio', 'num'],
+    ['ajustePercebida.dificil', 'Ajuste quando achou difícil (pontos)', 'num'],
+    ['ajustePercebida.facil', 'Ajuste quando achou fácil (pontos)', 'num'],
+  ]],
+  ['Avaliação de cada sessão', [
+    ['pesoQuestoes', 'Peso das questões', 'num'],
+    ['refQuestoes', 'Questões para peso total', 'int', 'Com menos questões, elas pesam proporcionalmente menos'],
+    ['pesoExplicacao', 'Peso da explicação', 'num'],
+    ['pesoPercebida', 'Peso da dificuldade percebida', 'num'],
+    ['notaExplicacao.completo', 'Nota da explicação "completa"', 'pct'],
+    ['notaExplicacao.pouco', 'Nota da explicação "faltou pouco"', 'pct'],
+    ['notaExplicacao.muito', 'Nota da explicação "faltou muito"', 'pct'],
+    ['percebidaValor.facil', 'Valor de "fácil"', 'pct'],
+    ['percebidaValor.ok', 'Valor de "ok"', 'pct'],
+    ['percebidaValor.dificil', 'Valor de "difícil"', 'pct'],
+  ]],
+  ['Cronômetro', [
+    ['alertaCronometroHoras', 'Avisar quando o cronômetro passar de (horas)', 'num'],
+  ]],
+];
+const ajLer = (o, cam) => cam.split('.').reduce((v, k) => v == null ? v : v[k], o);
+function ajGravar(o, cam, v){ const ks = cam.split('.'); let x = o; for (let i = 0; i < ks.length - 1; i++){ x[ks[i]] = Object.assign({}, x[ks[i]]); x = x[ks[i]]; } x[ks[ks.length - 1]] = v; }
+function ajFormatar(v, tipo){ if (v == null) return ''; if (tipo === 'lista') return v.join(', '); if (tipo === 'pct') return String(Math.round(v * 1000) / 10); return String(v); }
+function ajInterpretar(txt, tipo){
+  const t = String(txt).trim().replace(',', '.');
+  if (tipo === 'lista'){ const l = String(txt).split(/[;,\s]+/).filter(Boolean).map(Number); return l.length && l.every(n => Number.isInteger(n) && n > 0) && l.every((n, i) => !i || n > l[i - 1]) ? l : undefined; }
+  if (t === '' || !isFinite(Number(t))) return undefined;
+  const n = Number(t);
+  if (tipo === 'int') return Number.isInteger(n) && n >= 0 ? n : undefined;
+  if (tipo === 'pct') return n >= 0 && n <= 100 ? Math.round(n * 10) / 1000 : undefined;
+  return n;
+}
+EST_VIEWS.ajustes = function(body){
+  const aj = ajustes(), pad = EC.AJUSTES_PADRAO;
+  body.innerHTML = '<div class="est-hoje est-largo"><div class="est-nav"><h2 class="est-h2">Ajustes</h2><div class="spacer"></div><button class="btn-s" id="ajRest">Restaurar padrões</button><button class="btn-s primary" id="ajOk">Salvar ajustes</button></div>'
+    + '<div class="est-pequeno">Valores usados para calcular revisões, domínio e retenção. Mudanças valem para todo o histórico (tudo é recalculado a partir das sessões registradas — nada é apagado).</div>'
+    + AJ_CAMPOS.map(([tit, cs]) => '<section class="est-sec"><h3>' + tit + '</h3><div class="est-aj">' + cs.map(([cam, rot, tipo, dica]) => {
+      const v = ajLer(aj, cam), p = ajLer(pad, cam), mud = JSON.stringify(v) !== JSON.stringify(p);
+      return '<label class="est-aj-l' + (mud ? ' mudado' : '') + '"><span>' + rot + (dica ? '<small>' + dica + '</small>' : '') + '</span><input data-cam="' + cam + '" data-tipo="' + tipo + '" value="' + esc(ajFormatar(v, tipo)) + '"><em title="Padrão">padrão: ' + esc(ajFormatar(p, tipo)) + '</em></label>';
+    }).join('') + '</div></section>').join('')
+    + '<div class="est-msg" id="ajMsg"></div></div>';
+  const msg = body.querySelector('#ajMsg');
+  body.querySelector('#ajOk').onclick = async () => {
+    const novo = {}; const ruins = [];
+    body.querySelectorAll('input[data-cam]').forEach(i => { i.classList.remove('err'); const v = ajInterpretar(i.value, i.dataset.tipo); if (v === undefined){ ruins.push(i); i.classList.add('err'); } else ajGravar(novo, i.dataset.cam, v); });
+    if (!ruins.length){
+      const c = novo.categorias; if (!(c.excelente > c.bom && c.bom > c.regular)) ruins.push(...body.querySelectorAll('input[data-cam^="categorias."]'));
+      if (!(novo.limiarBom > novo.limiarBaixo)) ruins.push(body.querySelector('input[data-cam="limiarBom"]'), body.querySelector('input[data-cam="limiarBaixo"]'));
+      ruins.forEach(i => i.classList.add('err'));
+    }
+    if (ruins.length){ msg.textContent = 'Confira os campos destacados (números válidos; categorias em ordem decrescente; resultado bom acima do baixo; escada em ordem crescente).'; msg.className = 'est-msg err'; return; }
+    await ED.salvarAjustes(novo); toast('Ajustes salvos'); estRender();
+  };
+  body.querySelector('#ajRest').onclick = async () => {
+    if (!confirm('Voltar todos os ajustes para os valores padrão?')) return;
+    await ED.salvarAjustes(JSON.parse(JSON.stringify(EC.AJUSTES_PADRAO))); toast('Padrões restaurados'); estRender();
+  };
+};

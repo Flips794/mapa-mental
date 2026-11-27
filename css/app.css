@@ -578,6 +578,30 @@ html[data-theme=dark] .mk.estudo{background:#2e1065;color:#ddd6fe}html[data-them
 .est-mat{margin:6px 0}
 .est-mat input{flex:1}
 
+/* Estudos: desempenho e ajustes */
+.est-leg{font-weight:400;font-size:11.5px;color:var(--muted);margin-left:8px}
+.est-leg i{display:inline-block;width:9px;height:9px;border-radius:2px;margin:0 3px 0 8px;vertical-align:-1px}
+.est-leg i.lm,.est-bar-dia i.lm{background:var(--ring)}
+.est-leg i.lq,.est-bar-dia i.lq{background:#14b8a6}
+.est-dias{display:flex;align-items:flex-end;gap:2px;height:150px;padding:10px 10px 0;overflow-x:auto}
+.est-bar-dia{flex:1 0 8px;max-width:28px;height:100%;display:flex;flex-direction:column;align-items:center;gap:3px}
+.est-bar-dia .pr{flex:1;width:100%;display:flex;align-items:flex-end;justify-content:center;gap:1px}
+.est-bar-dia .pr i{flex:1;max-width:10px;border-radius:2px 2px 0 0;min-height:0}
+.est-bar-dia span{font-size:10px;color:var(--muted);height:13px}
+.est-prod{font-size:12.5px;color:var(--muted);padding:8px 12px 10px}
+.est-prod b{color:var(--ink)}
+.est-tabela td.nome{max-width:360px;overflow:hidden;text-overflow:ellipsis}
+.est-tabela tr.clicavel,.est-h-row.clicavel{cursor:pointer}
+.est-tabela tr.clicavel:hover,.est-h-row.clicavel:hover{background:var(--hover)}
+.est-aj{display:flex;flex-direction:column;padding:2px 6px 6px}
+.est-aj-l{display:grid;grid-template-columns:1fr 150px 110px;gap:10px;align-items:center;padding:6px;border-bottom:1px solid var(--line);font-size:13px}
+.est-aj-l:last-child{border-bottom:0}
+.est-aj-l span small{display:block;color:var(--muted);font-size:11.5px}
+.est-aj-l input{height:30px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--ink);padding:0 8px;font-size:13px}
+.est-aj-l input.err{border-color:var(--danger)}
+.est-aj-l em{font-style:normal;font-size:11.5px;color:var(--muted)}
+.est-aj-l.mudado span{font-weight:600}
+
 @media(max-width:760px){
   #panel{position:fixed;left:0;right:0;bottom:0;height:48vh;border-left:0;border-top:1px solid var(--line);z-index:30;box-shadow:0 -8px 24px rgba(0,0,0,.1)}
   #sidebar{position:fixed;left:0;top:46px;bottom:0;z-index:40;box-shadow:8px 0 24px rgba(0,0,0,.1)}

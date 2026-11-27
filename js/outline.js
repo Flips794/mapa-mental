@@ -549,6 +549,8 @@ async function exportAll(){
       for(const pid of (it.pdfs||[])){ if(out.pdfs[pid]) continue; const b=await Store.get('pdf:'+pid); if(b) out.pdfs[pid]=abToB64(b); }
     }
   }
+  // Estudos (registros, revisões, planos, erros, simulados, ajustes)
+  if(typeof estGarantirDados==='function'){ try{ const ed=await estGarantirDados(); out.estudos=ed.exportar(); }catch(e){ console.warn('Estudos fora do backup', e); toast('Atenção: não consegui incluir os Estudos no backup.'); } }
   const blob=new Blob([JSON.stringify(out)],{type:'application/json'});
   const url=URL.createObjectURL(blob), a=document.createElement('a');
   a.href=url; a.download='mapa-mental-tudo-'+new Date().toISOString().slice(0,10)+'.json';
@@ -577,7 +579,12 @@ async function importBackup(obj){
     }
     have.add(it.id); added++;
   }
+  let est=0;
+  if(obj.estudos && obj.estudos.arquivos && typeof estGarantirDados==='function'){
+    const ed=await estGarantirDados(); est=await ed.importar(obj.estudos);   // mescla: nada existente é perdido
+  }
   await wsSave(); renderSidebar();
   if(Store.remote) buildMissingMirrors();
-  toast(added+' item(ns) importado(s)'+(skipped?' · '+skipped+' já existiam e foram mantidos':''));
+  if(est && appMode==='est') estRender();
+  toast(added+' item(ns) importado(s)'+(skipped?' · '+skipped+' já existiam e foram mantidos':'')+(est?' · Estudos mesclados':''));
 }

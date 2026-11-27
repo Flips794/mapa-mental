@@ -101,6 +101,20 @@ Botão de lua/sol no topo. Na primeira visita segue o tema do sistema.
 - Inserir páginas em branco entre as páginas do PDF, mover e excluir páginas
 - **Exportar PDF**: gera o documento final (páginas do PDF + o que você escreveu + páginas novas)
 
+### 📅 Estudos (calendário de revisões)
+Botão **Estudos** no topo. Tudo fica junto com os mapas (no GitHub, em `estudos/`).
+- **Registrar estudo**: escolha o tópico do mapa (ou um assunto livre), métodos, questões feitas/acertos, explicação sem consulta (com conferência pelos sub-tópicos do mapa), dificuldade percebida e tempo (opcional, ou pelo **cronômetro**, que sobrevive a recarregar a página)
+- **Revisões automáticas**: escada 1 · 7 · 15 · 30 · 60 dias (mais curta para assuntos marcados como difíceis), ajustada pelo resultado de cada revisão; revisões baixas seguidas recomendam **estudar de novo** em vez de revisar cada vez mais perto
+- **Domínio** (o quanto você sabe, com peso para o mais recente) e **retenção** (o quanto você lembra nas revisões) são medidos separados; só são classificados com evidência mínima (Excelente ≥ 90 · Bom ≥ 75 · Regular ≥ 60 · Crítico)
+- **Hoje**: atrasadas, para hoje, para estudar de novo, planejado do dia e próximos 7 dias · **Calendário** do mês
+- **Planejamento** semanal com metas de tempo e questões; planejado × realizado (só conta como feito com estudo registrado); reagendar ou cancelar
+- **Banco de erros** por motivo (desconhecimento, esquecimento, interpretação, cálculo, confusão conceitual, desatenção), com filtros e estatísticas
+- **Simulados** com nota pelo critério da banca (Cebraspe: cada erro anula um acerto; sem penalidade; ou critérios próprios) e evolução
+- **Desempenho**: horas, questões, taxa de acerto, tempo por questão, gráficos por dia, por matéria e por assunto, evolução mensal e pontos fracos
+- **Ajustes**: todos os parâmetros (escada, limites, pesos) com "restaurar padrões"; o histórico é sempre recalculado, nada é apagado
+- Editar ou excluir um registro recalcula tudo e guarda as versões anteriores. Sem internet, o registro fica no navegador e sobe sozinho depois; dois aparelhos podem registrar ao mesmo tempo sem perder nada
+- O backup completo (`.json`) inclui os Estudos
+
 ## ⌨️ Atalhos do mapa
 
 | Tecla | Ação |
@@ -125,6 +139,10 @@ js/util.js          armazenamento, HTML seguro, utilidades
 js/map.js           editor de mapa mental
 js/docs.js          editor de documentos / PDF
 js/outline.js       formato de texto do mapa, painel Texto e IA
+js/estudos-core.js  Estudos: regras (revisões, domínio, retenção, estatísticas, simulados)
+js/estudos-dados.js Estudos: gravação mesclada entre aparelhos + cópia local de segurança
+js/estudos.js       Estudos: telas
+tests/              testes automáticos (node --test tests/)
 js/app.js           barra lateral, modos e inicialização
 server/server.js    servidor local (Node, sem dependências) + instalar-servico.sh
 vendor/pdfjs/       PDF.js 3.11.174 (Mozilla, Apache 2.0) para ler PDFs
