@@ -304,6 +304,11 @@ async function estAbrirRegistro(o){
   };
   const marcarTipo = (t) => { const r = el.querySelector('#erTipo input[value="' + t + '"]'); if (r) r.checked = true; };
   desenharQue();
+  if (o.livre && !item && !st.topico){
+    const bLivre = que.querySelector('.est-seg button[data-modo=livre]'); if (bLivre) bLivre.click();
+    if (que.querySelector('#erLivreTxt')) que.querySelector('#erLivreTxt').value = o.livre.titulo || '';
+    if (que.querySelector('#erLivreMat')) que.querySelector('#erLivreMat').value = o.livre.materia || '';
+  }
 
   // valores iniciais
   el.querySelector('#erData').value = st.data;
@@ -489,3 +494,172 @@ async function estCronoAcao(acao){
   } catch (e){ toast(e.message); }
   estAtualizarCrono(); estAtualizarBarra();
 }
+
+/* =========================================================
+   Calendário do mês
+   ========================================================= */
+const STATUS_PLANO = { pendente: 'Pendente', atrasada: 'Não feita', concluida: 'Concluída', reagendada: 'Reagendada', cancelada: 'Cancelada' };
+function nomeAtividade(p){
+  if (p.itemId){ const it = ED.item(p.itemId); if (it) return it.caminho; }
+  if (p.topico) return p.topico.caminho;
+  return (p.titulo || 'Atividade') + (p.materia ? ' — ' + p.materia : '');
+}
+EST_VIEWS.calendario = function(body){
+  const h = estHoje();
+  const mes = estUi.mes || EC.mesDe(h);
+  const primeiro = mes + '-01';
+  const inicio = EC.inicioSemana(primeiro);
+  const ultimoDia = EC.addDias(EC.mesDe(EC.addDias(primeiro, 32)) + '-01', -1);
+  const fimGrade = EC.addDias(EC.inicioSemana(ultimoDia), 6);
+  const sessoes = ED.todas('sessoes'), sims = ED.simulados(), planos = ED.todas('planos');
+  const serie = new Map(EC.serieDiaria(sessoes, sims, inicio, fimGrade).map(d => [d.data, d]));
+  const ag = estAgenda();
+  const previstas = new Map();
+  for (const [id, e] of ag.estados) if (e.status === 'ativo' && e.proxima && e.proxima >= h){ previstas.set(e.proxima, (previstas.get(e.proxima) || 0) + 1); }
+  const [a, m] = mes.split('-').map(Number);
+  const nomeMes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'][m - 1] + ' ' + a;
+  let cels = '';
+  for (let d = inicio; d <= fimGrade; d = EC.addDias(d, 1)){
+    const doDia = sessoes.filter(s => s.data === d);
+    const tipos = { estudo: 0, revisao: 0, retomada: 0 };
+    doDia.forEach(s => tipos[s.tipo] = (tipos[s.tipo] || 0) + 1);
+    const pl = planos.filter(p => p.data === d && p.status !== 'reagendada' && p.status !== 'cancelada');
+    const plFeitos = pl.filter(p => EC.planoStatus(p, sessoes.filter(s => s.planoId === p.id), h) === 'concluida').length;
+    const sd = serie.get(d) || { questoes: 0, minutos: 0 };
+    const atr = d === h ? ag.atrasadas.length : 0;
+    cels += '<div class="est-cal-dia' + (EC.mesDe(d) !== mes ? ' fora' : '') + (d === h ? ' hoje' : '') + (atr ? ' com-atraso' : '') + '" data-dia="' + d + '">'
+      + '<span class="n">' + Number(d.slice(8)) + '</span>'
+      + (tipos.estudo ? '<i class="mk estudo" title="Estudos">' + tipos.estudo + ' estudo' + (tipos.estudo > 1 ? 's' : '') + '</i>' : '')
+      + (tipos.revisao ? '<i class="mk revisao" title="Revisões feitas">' + tipos.revisao + ' revis' + (tipos.revisao > 1 ? 'ões' : 'ão') + '</i>' : '')
+      + (tipos.retomada ? '<i class="mk retomada">' + tipos.retomada + ' retomada' + (tipos.retomada > 1 ? 's' : '') + '</i>' : '')
+      + (previstas.get(d) ? '<i class="mk prevista" title="Revisões previstas">' + previstas.get(d) + ' prevista' + (previstas.get(d) > 1 ? 's' : '') + '</i>' : '')
+      + (atr ? '<i class="mk atraso">' + atr + ' atrasada' + (atr > 1 ? 's' : '') + '</i>' : '')
+      + (pl.length ? '<i class="mk plano" title="Planejado">' + plFeitos + '/' + pl.length + ' planejado</i>' : '')
+      + (sd.questoes || sd.minutos ? '<small>' + (sd.questoes ? sd.questoes + 'q' : '') + (sd.questoes && sd.minutos ? ' · ' : '') + (sd.minutos ? fmtMin(sd.minutos) : '') + '</small>' : '')
+      + '</div>';
+  }
+  body.innerHTML = '<div class="est-hoje"><div class="est-nav"><button class="ib" id="calAnt" title="Mês anterior">‹</button><h2 class="est-h2">' + nomeMes + '</h2><button class="ib" id="calProx" title="Próximo mês">›</button><button class="btn-s" id="calHoje">Hoje</button></div>'
+    + '<div class="est-cal"><div class="est-cal-sem">' + ['seg','ter','qua','qui','sex','sáb','dom'].map(x => '<span>' + x + '</span>').join('') + '</div><div class="est-cal-grade">' + cels + '</div></div></div>';
+  const mudar = (n) => { const d = EC.addDias(primeiro, n > 0 ? 32 : -1); estUi.mes = EC.mesDe(d); estRender(); };
+  body.querySelector('#calAnt').onclick = () => mudar(-1);
+  body.querySelector('#calProx').onclick = () => mudar(1);
+  body.querySelector('#calHoje').onclick = () => { estUi.mes = null; estRender(); };
+  body.querySelectorAll('.est-cal-dia').forEach(c => c.onclick = () => estAbrirDia(c.dataset.dia));
+};
+function estAbrirDia(d){
+  const h = estHoje(), sessoes = ED.todas('sessoes'), ag = estAgenda();
+  const doDia = EC.ordenarSessoes(sessoes.filter(s => s.data === d));
+  const prev = [...ag.estados.entries()].filter(([, e]) => e.status === 'ativo' && e.proxima === d).map(([id]) => ED.item(id)).filter(Boolean);
+  const pl = ED.todas('planos').filter(p => p.data === d);
+  const sims = ED.simulados().filter(s => s.data === d);
+  const r = EC.resumoDia(sessoes, ED.simulados(), d);
+  const { el, fechar } = estModal('<div class="modal-head"><b>' + fmtData(d, true) + '</b><button class="ib" data-fechar>✕</button></div><div class="est-form">'
+    + '<div class="est-resumo">' + r.sessoes + ' registro(s) · ' + r.questoes + ' questões' + (r.questoes ? ' (' + pct(r.acertos, r.questoes) + '%)' : '') + (r.minutos ? ' · ' + fmtMin(r.minutos) : '') + '</div>'
+    + '<h4 class="est-h4">Feito</h4>' + (doDia.length ? doDia.map(s => { const it = ED.item(s.itemId); return '<div class="est-h-row"><span class="t">' + TIPO_TXT[s.tipo] + '</span><span class="m">' + esc(it ? it.caminho : '(assunto removido)') + '</span><span class="r">' + (s.questoes ? s.questoes.acertos + '/' + s.questoes.feitas : '') + '</span><span class="d">' + (s.minutos ? fmtMin(s.minutos) : '') + '</span></div>'; }).join('') : '<div class="est-vazio pequeno">Nada registrado.</div>')
+    + (sims.length ? '<h4 class="est-h4">Simulados</h4>' + sims.map(s => '<div class="est-h-row"><span class="m">' + esc((s.concurso || 'Simulado') + (s.banca ? ' · ' + s.banca : '')) + '</span><span class="r">' + s.acertos + '/' + s.questoes + '</span></div>').join('') : '')
+    + (prev.length ? '<h4 class="est-h4">Revisões previstas</h4>' + prev.map(it => '<div class="est-h-row"><span class="m">' + esc(it.caminho) + '</span></div>').join('') : '')
+    + (pl.length ? '<h4 class="est-h4">Planejado</h4>' + pl.map(p => '<div class="est-h-row"><span class="m">' + esc(nomeAtividade(p)) + '</span><span class="t">' + STATUS_PLANO[EC.planoStatus(p, sessoes.filter(s => s.planoId === p.id), h)] + '</span></div>').join('') : '')
+    + '<div class="est-row fim"><button class="btn-s primary" id="diaReg">Registrar neste dia</button></div></div>', 'est-box');
+  el.querySelector('#diaReg').onclick = () => { fechar(); estAbrirRegistro({ data: d <= h ? d : h }); };
+}
+
+/* =========================================================
+   Planejamento semanal (planejado ≠ realizado até haver registro)
+   ========================================================= */
+EST_VIEWS.planejamento = function(body){
+  const h = estHoje(), inicio = estUi.semana || EC.inicioSemana(h);
+  const sessoes = ED.todas('sessoes'), planos = ED.todas('planos');
+  const r = EC.resumoSemana(planos, sessoes, inicio, h);
+  const barra = (feito, meta, txt) => '<div class="est-meta"><div class="est-meta-txt">' + txt + '</div><div class="est-meta-bar"><i style="width:' + Math.min(100, meta > 0 ? Math.round(feito / meta * 100) : 0) + '%"></i></div></div>';
+  const diasNome = ['Seg','Ter','Qua','Qui','Sex','Sáb','Dom'];
+  body.innerHTML = '<div class="est-hoje est-largo"><div class="est-nav"><button class="ib" id="plAnt" title="Semana anterior">‹</button><h2 class="est-h2">Semana de ' + fmtData(inicio) + ' a ' + fmtData(EC.addDias(inicio, 6), true) + '</h2><button class="ib" id="plProx" title="Próxima semana">›</button><button class="btn-s" id="plHoje">Esta semana</button></div>'
+    + '<div class="est-cards">'
+    + '<div class="est-card"><span>Tempo: realizado / planejado</span><b>' + fmtMin(r.realizado.minutos) + ' / ' + fmtMin(r.planejado.minutos) + '</b>' + barra(r.realizado.minutos, r.planejado.minutos, '') + '</div>'
+    + '<div class="est-card"><span>Questões: realizado / planejado</span><b>' + r.realizado.questoes + ' / ' + r.planejado.questoes + '</b>' + barra(r.realizado.questoes, r.planejado.questoes, '') + '</div>'
+    + '</div>'
+    + '<div class="est-semana">' + r.dias.map((dia, i) => '<div class="est-dia-col' + (dia.data === h ? ' hoje' : '') + '"><div class="est-dia-cab"><b>' + diasNome[i] + '</b> ' + fmtData(dia.data) + '<button class="ib" data-novo="' + dia.data + '" title="Planejar neste dia">＋</button></div>'
+      + dia.itens.map(x => '<div class="est-plano st-' + x.status + '" data-id="' + esc(x.plano.id) + '"><b></b><span>' + [x.plano.metaMinutos ? 'meta ' + fmtMin(x.plano.metaMinutos) : '', x.plano.metaQuestoes ? x.plano.metaQuestoes + ' questões' : ''].filter(Boolean).join(' · ') + '</span>'
+        + '<span class="est-plano-st">' + STATUS_PLANO[x.status] + (x.status === 'concluida' ? ' · feito ' + [x.realizado.minutos ? fmtMin(x.realizado.minutos) : '', x.realizado.questoes ? x.realizado.questoes + 'q' : ''].filter(Boolean).join(' · ') : '') + (x.plano.reagendadaPara ? ' → ' + fmtData(x.plano.reagendadaPara) : '') + '</span>'
+        + '<div class="est-plano-ac">' + (x.status === 'pendente' || x.status === 'atrasada' ? '<button class="btn-s" data-a="registrar">Registrar</button><button class="ib" data-a="reagendar" title="Reagendar">📅</button><button class="ib" data-a="cancelar" title="Cancelar">⊘</button>' : '') + '<button class="ib" data-a="excluir" title="Excluir">🗑</button></div></div>').join('')
+      + '</div>').join('') + '</div></div>';
+  const mover = (n) => { estUi.semana = EC.addDias(inicio, n * 7); estRender(); };
+  body.querySelector('#plAnt').onclick = () => mover(-1);
+  body.querySelector('#plProx').onclick = () => mover(1);
+  body.querySelector('#plHoje').onclick = () => { estUi.semana = null; estRender(); };
+  body.querySelectorAll('[data-novo]').forEach(b => b.onclick = () => estAbrirPlano({ data: b.dataset.novo }));
+  body.querySelectorAll('.est-plano').forEach(card => {
+    const p = planos.find(x => x.id === card.dataset.id);
+    card.querySelector('b').textContent = nomeAtividade(p);
+    card.querySelectorAll('[data-a]').forEach(b => b.onclick = () => estAcaoPlano(p, b.dataset.a));
+  });
+};
+function estRegistrarDoPlano(p){
+  const base = { planoId: p.id, data: p.data <= estHoje() ? (p.data < estHoje() ? estHoje() : p.data) : estHoje() };
+  if (p.itemId && ED.item(p.itemId)) return estAbrirRegistro(Object.assign(base, { itemId: p.itemId }));
+  if (p.topico) return estAbrirRegistro(Object.assign(base, { topico: p.topico }));
+  return estAbrirRegistro(Object.assign(base, { livre: { titulo: p.titulo || '', materia: p.materia || '' } }));
+}
+async function estAcaoPlano(p, acao){
+  if (acao === 'registrar') return estRegistrarDoPlano(p);
+  if (acao === 'excluir'){ if (!confirm('Excluir esta atividade planejada?')) return; await ED.excluirPlano(p.id); }
+  if (acao === 'cancelar') await ED.salvarPlano(Object.assign({}, p, { status: 'cancelada' }));
+  if (acao === 'reagendar'){
+    const { el, fechar } = estModal('<div class="modal-head"><b>Reagendar</b><button class="ib" data-fechar>✕</button></div><div class="est-form"><div class="est-campo"><label>Nova data</label><input type="date" id="rgData"></div><div class="est-row fim"><button class="btn-s" data-fechar>Cancelar</button><button class="btn-s primary" id="rgOk">Reagendar</button></div></div>', 'est-box est-pequeno');
+    el.querySelector('#rgData').value = EC.addDias(estHoje(), 1);
+    el.querySelector('#rgOk').onclick = async () => { const d = el.querySelector('#rgData').value; if (!d) return; await ED.reagendarPlano(p.id, d); fechar(); toast('Reagendado para ' + fmtData(d)); estRender(); };
+    return;
+  }
+  estRender();
+}
+async function estAbrirPlano(o){
+  const tops = await estTopicos();
+  let escolha = null;
+  const { el, fechar } = estModal('<div class="modal-head"><b>Planejar atividade</b><button class="ib" data-fechar>✕</button></div><div class="est-form">'
+    + '<div class="est-campo"><label>O que estudar</label><div class="est-seg"><button class="on" data-modo="topico">Tópico dos mapas</button><button data-modo="livre">Livre</button></div>'
+    + '<div id="plBusca"><input id="plQ" placeholder="Buscar tópico ou assunto já acompanhado…" autocomplete="off"><div class="est-res" id="plRes"></div><div class="est-esc hidden" id="plEsc"><b></b></div></div>'
+    + '<div id="plLivre" class="hidden est-linha2"><input id="plTitulo" placeholder="Ex.: Simulado de Português"><input id="plMat" list="plMatList" placeholder="Matéria (opcional)"><datalist id="plMatList">' + ws.items.filter(i => i.type === 'map').map(i => '<option value="' + esc(i.title) + '">').join('') + '</datalist></div></div>'
+    + '<div class="est-linha2"><div class="est-campo"><label>Dia</label><input type="date" id="plData"></div><div class="est-campo"><label>Meta de tempo</label><input id="plMin" placeholder="ex.: 1h30 (opcional)"></div><div class="est-campo"><label>Meta de questões</label><input type="number" min="0" id="plQ2" placeholder="opcional"></div></div>'
+    + '<div class="est-msg" id="plMsg"></div><div class="est-row fim"><button class="btn-s" data-fechar>Cancelar</button><button class="btn-s primary" id="plOk">Planejar</button></div></div>', 'est-box');
+  el.querySelector('#plData').value = o.data || estHoje();
+  let modo = 'topico';
+  el.querySelectorAll('.est-seg button').forEach(b => b.onclick = () => { modo = b.dataset.modo; el.querySelectorAll('.est-seg button').forEach(x => x.classList.toggle('on', x === b)); el.querySelector('#plBusca').classList.toggle('hidden', modo !== 'topico'); el.querySelector('#plLivre').classList.toggle('hidden', modo !== 'livre'); });
+  const q = el.querySelector('#plQ'), res = el.querySelector('#plRes');
+  q.addEventListener('input', () => {
+    const t = semAcento(q.value.trim());
+    const livres = ED.todas('itens').filter(i => i.tipo === 'livre').map(i => ({ livreItem: i, caminho: i.caminho }));
+    const achados = t ? tops.concat(livres).filter(x => semAcento(x.caminho).includes(t)).slice(0, 30) : [];
+    res.innerHTML = achados.map((x, i) => '<button data-i="' + i + '"></button>').join('');
+    res.querySelectorAll('button').forEach(b => { const x = achados[Number(b.dataset.i)]; b.textContent = x.caminho; b.onclick = () => { escolha = x; res.innerHTML = ''; const esc_ = el.querySelector('#plEsc'); esc_.classList.remove('hidden'); esc_.querySelector('b').textContent = x.caminho; }; });
+  });
+  setTimeout(() => q.focus(), 30);
+  el.querySelector('#plOk').onclick = async () => {
+    const msg = el.querySelector('#plMsg');
+    const p = { id: ED.novoId(), data: el.querySelector('#plData').value, status: 'planejada', metaMinutos: 0, metaQuestoes: parseInt(el.querySelector('#plQ2').value, 10) || 0 };
+    const mt = el.querySelector('#plMin').value.trim();
+    if (mt){ const m = EC.parseDuracao(mt); if (m == null){ msg.textContent = 'Não entendi a meta de tempo (ex.: 1h30).'; msg.className = 'est-msg err'; return; } p.metaMinutos = m; }
+    if (!p.data){ msg.textContent = 'Escolha o dia.'; msg.className = 'est-msg err'; return; }
+    if (modo === 'topico'){
+      if (!escolha){ msg.textContent = 'Escolha um tópico ou use "Livre".'; msg.className = 'est-msg err'; return; }
+      if (escolha.livreItem) p.itemId = escolha.livreItem.id;
+      else { const ja = ED.todas('itens').find(i => i.mapId === escolha.mapId && i.nodeId === escolha.nodeId); if (ja) p.itemId = ja.id; else p.topico = { mapId: escolha.mapId, nodeId: escolha.nodeId, caminho: escolha.caminho, materia: escolha.materia }; }
+    } else {
+      p.titulo = el.querySelector('#plTitulo').value.trim(); p.materia = el.querySelector('#plMat').value.trim();
+      if (!p.titulo){ msg.textContent = 'Escreva o que você vai estudar.'; msg.className = 'est-msg err'; return; }
+    }
+    await ED.salvarPlano(p); fechar(); toast('Planejado para ' + fmtData(p.data)); estRender();
+  };
+}
+/* "Planejado para hoje" dentro da tela Hoje */
+EST_VIEWS._planejadoHoje = function(d){
+  const sessoes = ED.todas('sessoes');
+  const lista = ED.todas('planos').filter(p => p.data <= d && p.status === 'planejada').map(p => ({ p, st: EC.planoStatus(p, sessoes.filter(s => s.planoId === p.id), d) })).filter(x => x.st === 'pendente' || x.st === 'atrasada');
+  if (!lista.length) return '';
+  return '<section class="est-sec planejado"><h3>📅 Planejado (' + lista.length + ')</h3>' + lista.map(x => '<div class="est-linha" data-plano="' + esc(x.p.id) + '"><div class="est-l-txt"><b></b><span>' + (x.st === 'atrasada' ? 'era para ' + fmtData(x.p.data) + ' · ' : '') + [x.p.metaMinutos ? 'meta ' + fmtMin(x.p.metaMinutos) : '', x.p.metaQuestoes ? x.p.metaQuestoes + ' questões' : ''].filter(Boolean).join(' · ') + '</span></div><button class="btn-s" data-plano-reg>Registrar</button></div>').join('') + '</section>';
+};
+EST_VIEWS._ligarPlanejadoHoje = function(body){
+  body.querySelectorAll('[data-plano]').forEach(row => {
+    const p = ED.todas('planos').find(x => x.id === row.dataset.plano);
+    row.querySelector('b').textContent = nomeAtividade(p);
+    row.onclick = () => estRegistrarDoPlano(p);
+  });
+};
