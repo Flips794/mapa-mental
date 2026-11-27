@@ -13,12 +13,14 @@ async function switchMode(m,opts){
   opts=opts||{};
   if(m===appMode) return;
   if(appMode==='map'){ if(editingId) endInlineEdit(); await mapFlush(); }
-  else await docFlush();
+  else if(appMode==='doc') await docFlush();
   appMode=m; ws.mode=m; wsSave();
   document.body.classList.toggle('mode-map',m==='map');
   document.body.classList.toggle('mode-doc',m==='doc');
+  document.body.classList.toggle('mode-est',m==='est');
   document.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
   if(m==='map'){ mapShown(); }
+  else if(m==='est'){ await estShown(); return; }
   else if(!opts.noAutoOpen && !D){
     const docs=ws.items.filter(i=>i.type==='doc');
     const target = docs.find(d=>d.id===ws.current.doc) || docs[0];
@@ -32,6 +34,7 @@ document.querySelectorAll('.seg button').forEach(b=>b.addEventListener('click',(
 const sbList=$('#sbList');
 function renderSidebar(){
   if(!ws) return;
+  if(appMode==='est'){ estRenderSidebar(); return; }
   const type=appMode;
   $('#sbTitle').textContent = type==='map' ? 'Mapas mentais' : 'Documentos';
   $('#sbNew').title = type==='map' ? 'Novo mapa mental' : 'Novo documento';
@@ -68,7 +71,7 @@ sbList.addEventListener('click',async e=>{
 });
 sbList.addEventListener('dblclick',e=>{ const row=e.target.closest('.sb-item'); if(row && !e.target.closest('.more')) renameItem(wsItem(row.dataset.id)); });
 
-$('#sbNew').addEventListener('click',()=>{ if(appMode==='map') newMap(); else newDocument(); });
+$('#sbNew').addEventListener('click',()=>{ if(appMode==='map') newMap(); else if(appMode==='est') estAbrirRegistro({}); else newDocument(); });
 $('#sbPdf').addEventListener('click',()=>pickPdf('new'));
 $('#sbBtn').addEventListener('click',()=>{ $('#sidebar').classList.toggle('collapsed'); $('#sbBtn').classList.toggle('on',!$('#sidebar').classList.contains('collapsed')); if(appMode==='map') scheduleLayout(); });
 
@@ -167,7 +170,7 @@ async function deleteItem(it){
     const id=genId(); await Store.set('map:'+id, defaultMap());
     ws.items.unshift({id,type:'map',title:'Meu Mapa Mental',updated:Date.now()});
   }
-  appMode = ws.mode==='doc' ? 'doc' : 'map';
+  appMode = ws.mode==='doc' ? 'doc' : ws.mode==='est' ? 'est' : 'map';
   document.body.classList.add('mode-'+appMode);
   document.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.mode===appMode));
 
@@ -179,6 +182,7 @@ async function deleteItem(it){
     if(t) await docOpen(t.id); else updateDocEmpty();
   } else updateDocEmpty();
   renderSidebar();
+  if(appMode==='est') estShown();
   const gh=Store.github;
   setStatus({server:'Pronto ✓', github:'GitHub ✓', local:'Pronto (só neste navegador)'}[Store.mode]);
   $('#status').title = {
