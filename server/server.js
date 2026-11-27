@@ -37,6 +37,8 @@ if (process.env.EXTRA_HOSTS) process.env.EXTRA_HOSTS.split(',').forEach(h => okH
 
 function keyPath(key) {
   if (key === 'ws') return { file: path.join(DATA, 'ws.json'), bin: false };
+  const e = /^est:([a-z]+)(?:-(\d{4}-\d{2}))?$/.exec(key);
+  if (e) return { file: e[2] ? path.join(DATA, 'estudos', e[1], e[2] + '.json') : path.join(DATA, 'estudos', e[1] + '.json'), bin: false };
   const m = /^(map|doc|pdf):(.+)$/.exec(key);
   if (m && ID.test(m[2])) {
     const dir = { map: 'mapas', doc: 'documentos', pdf: 'pdfs' }[m[1]];

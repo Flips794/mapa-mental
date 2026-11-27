@@ -63,6 +63,15 @@ const Store = (()=>{
         return r.ok;
       }catch(e){ return false; }
     },
+    /* grava mesclando com a versão já salva (coleções de estudos); devolve o resultado ou null */
+    async setMesclando(k,v,mesclar){
+      await ready;
+      if(mode==='github') return gh.setMesclando(k,v,mesclar);
+      let cur;
+      try{ cur = await this.get(k); }catch(e){ return null; }
+      const final=mesclar(v, cur||null);
+      return (await this.set(k,final)) ? final : null;
+    },
     async del(k){
       await ready;
       if(mode==='github') return gh.del(k);
@@ -102,6 +111,8 @@ function GitHubStore(cfg){
   const encPath=p=>p.split('/').map(encodeURIComponent).join('/');
   function pathOf(k){
     if(k==='ws') return 'ws.json';
+    const e=/^est:([a-z]+)(?:-(\d{4}-\d{2}))?$/.exec(k);
+    if(e) return e[2] ? 'estudos/'+e[1]+'/'+e[2]+'.json' : 'estudos/'+e[1]+'.json';
     const m=/^(map|doc|pdf):(.+)$/.exec(k);
     if(m && ID.test(m[2])) return ({map:'mapas',doc:'documentos',pdf:'pdfs'})[m[1]]+'/'+m[2]+(m[1]==='pdf'?'.pdf':'.json');
     if(ID.test(k)) return 'outros/'+k+'.json';
@@ -201,6 +212,19 @@ function GitHubStore(cfg){
         }
         const bytes = v instanceof ArrayBuffer ? new Uint8Array(v) : enc.encode(JSON.stringify(v));
         return putBytes(path,bytes,'Salva '+label(k));
+      });
+    },
+    /* lê a versão do repositório, grava a mescla e devolve o resultado (null se não conseguiu) */
+    setMesclando(k,v,mesclar){
+      const path=pathOf(k);
+      return enqueue(path, async()=>{
+        for(let tentativa=0; tentativa<3; tentativa++){
+          const cur=await readBytes(path);
+          const final=mesclar(v, cur ? JSON.parse(dec.decode(cur)) : null);
+          if(await putBytes(path, enc.encode(JSON.stringify(final)), 'Salva '+label(k), false)) return final;
+          shas.delete(path);   // alguém gravou antes: relê e mescla de novo
+        }
+        return null;
       });
     },
     del(k){
