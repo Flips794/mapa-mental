@@ -210,8 +210,80 @@ function retencao(sessoes, aj, refData){
   return { valor, categoria: suficiente ? categoria(valor, aj) : null, suficiente, revisoes: revs.length, maiorIntervaloBom };
 }
 
+/* ---------- Escada de revisões e diagnóstico (spec 7.4) ---------- */
+function escadaDo(item, aj){
+  aj = aj || AJUSTES_PADRAO;
+  const base = aj.escada.concat([aj.degrauExtra]);
+  if (!item || !item.dificil) return base.slice();
+  // arredonda .5 para baixo: 15×0,7 = 10,5 → 10 (spec: 1 → 5 → 10 → 21 → 42)
+  return base.map((d, i) => i === 0 ? d : Math.max(1, Math.round(d * aj.fatorDificil - 1e-9)));
+}
+/* Estado de um assunto, sempre recalculado repassando o histórico (spec 7.5) */
+function calcularEstado(item, sessoes, aj, hojeStr){
+  aj = aj || AJUSTES_PADRAO;
+  hojeStr = hojeStr || hoje();
+  const lista = ordenarSessoes(sessoes);
+  const escada = escadaDo(item, aj), maxNormal = escada.length - 2, extra = escada.length - 1;
+  const fim = (extraCampos) => Object.assign({
+    dominio: dominio(lista, aj, hojeStr), retencao: retencao(lista, aj, hojeStr),
+  }, extraCampos);
+  if (!lista.length) return fim({ status: item && item.semRevisao ? 'sem-revisao' : 'novo', degrau: null, intervalo: null, ultima: null, proxima: null, atrasoDias: 0, diagnostico: null, baixasSeguidas: 0, revisoes: 0 });
+  let degrau = null, baixas = 0, status = 'ativo', diagnostico = null, revisoes = 0, ultimoR = null;
+  lista.forEach((s, i) => {
+    if (s.tipo === 'revisao') revisoes++;
+    const r = resultadoSessao(s, aj);
+    if (degrau === null || s.tipo === 'retomada'){             // primeiro estudo ou retomada: recomeça
+      degrau = 0; baixas = 0; status = 'ativo'; diagnostico = null;
+      if (r != null) ultimoR = r;
+      return;
+    }
+    if (r == null) return;                                      // sem evidência: mantém o degrau
+    const antes = dominio(lista.slice(0, i), aj, s.data);       // domínio de ANTES desta revisão
+    if (r >= aj.limiarBom){
+      baixas = 0; status = 'ativo';
+      const consolidado = antes.suficiente && antes.valor >= aj.dominioConsolidado && ultimoR != null && ultimoR >= aj.limiarBom;
+      if (consolidado){ degrau = Math.min(degrau + 2, extra); diagnostico = 'consolidado'; }
+      else { diagnostico = 'progresso'; if (s.percebida !== 'dificil' && degrau < maxNormal) degrau++; }
+    } else if (r >= aj.limiarBaixo){
+      baixas = 0; status = 'ativo'; diagnostico = 'estavel';
+    } else {
+      baixas++;
+      if (baixas >= aj.recorrenteN){ status = 'retomada'; diagnostico = 'recorrente'; }
+      else if ((antes.suficiente && antes.valor >= aj.dominioEsquecimento) || (ultimoR != null && ultimoR >= aj.limiarBom)){
+        degrau = Math.max(0, Math.min(degrau, maxNormal) - 1); diagnostico = 'esquecimento';
+      } else { degrau = 0; diagnostico = 'compreensao'; }
+    }
+    ultimoR = r;
+  });
+  const ultima = lista[lista.length - 1].data;
+  if (item && item.semRevisao) status = 'sem-revisao';
+  const intervalo = escada[degrau];
+  const proxima = status === 'ativo' ? addDias(ultima, intervalo) : null;
+  const atrasoDias = proxima && proxima < hojeStr ? diffDias(proxima, hojeStr) : 0;
+  return fim({ status, degrau, intervalo, ultima, proxima, atrasoDias, diagnostico, baixasSeguidas: baixas, revisoes });
+}
+/* O que fazer hoje: atrasadas, do dia, retomadas recomendadas, próximos 7 dias */
+function agenda(itens, sessoesPorItem, aj, hojeStr){
+  hojeStr = hojeStr || hoje();
+  const out = { atrasadas: [], hoje: [], retomar: [], proximos7: 0, estados: new Map() };
+  for (const it of itens || []){
+    if (!it || it.excluida) continue;
+    const estado = calcularEstado(it, sessoesPorItem.get(it.id) || [], aj, hojeStr);
+    out.estados.set(it.id, estado);
+    if (estado.status === 'retomada') out.retomar.push({ item: it, estado });
+    else if (estado.status === 'ativo' && estado.proxima){
+      if (estado.proxima < hojeStr) out.atrasadas.push({ item: it, estado });
+      else if (estado.proxima === hojeStr) out.hoje.push({ item: it, estado });
+      else if (diffDias(hojeStr, estado.proxima) <= 7) out.proximos7++;
+    }
+  }
+  out.atrasadas.sort((a, b) => b.estado.atrasoDias - a.estado.atrasoDias);
+  return out;
+}
+
 const api = {
   AJUSTES_PADRAO,
+  escadaDo, calcularEstado, agenda,
   ordenarSessoes, resultadoSessao, categoria, dominio, retencao,
   colecao, salvarRegistro, excluirRegistro, registrosAtivos, mesclarColecoes, estavel,
   hoje, addDias, diffDias, mesDe, inicioSemana, parseDuracao,

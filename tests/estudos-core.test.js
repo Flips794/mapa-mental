@@ -214,3 +214,99 @@ test('domínio e retenção são métricas diferentes', () => {
   assert.ok(d.valor > 70, 'domínio ' + d.valor);
   assert.notEqual(d.valor, r.valor);
 });
+
+/* ---------- Task 4: escada, diagnóstico, estado e agenda ---------- */
+const item = (o) => Object.assign({ id: 'i1', tipo: 'topico', caminho: 'Mat › 01' }, o);
+const q = (data, a, n, extra) => ses(Object.assign({ data, questoes: { feitas: n || 10, acertos: a } }, extra || {}));
+
+test('escada normal e encurtada para assunto difícil', () => {
+  assert.deepEqual(C.escadaDo(item(), AJ), [1, 7, 15, 30, 60, 120]);
+  assert.deepEqual(C.escadaDo(item({ dificil: true }), AJ), [1, 5, 10, 21, 42, 84]);
+});
+
+test('primeiro estudo agenda revisão em 1 dia', () => {
+  const e = C.calcularEstado(item(), [q('2026-11-20', 7, 10, { tipo: 'estudo' })], AJ, '2026-11-20');
+  assert.equal(e.status, 'ativo');
+  assert.equal(e.degrau, 0);
+  assert.equal(e.proxima, '2026-11-21');
+  assert.equal(C.calcularEstado(item(), [], AJ, '2026-11-20').status, 'novo');
+});
+
+test('progresso sobe um degrau; percebida difícil mantém', () => {
+  const base = [q('2026-11-01', 7, 10, { tipo: 'estudo' })];
+  let e = C.calcularEstado(item(), base.concat([q('2026-11-02', 9)]), AJ, '2026-11-02');
+  assert.equal(e.diagnostico, 'progresso'); assert.equal(e.degrau, 1); assert.equal(e.proxima, '2026-11-09');
+  // 10/10 + explicação completa + 'difícil' → s = (2+2+0,4)/5 = 0,88: progresso, mas mantém o degrau
+  e = C.calcularEstado(item(), base.concat([q('2026-11-02', 10, 10, { percebida: 'dificil', explicacao: { nota: 'completo' } })]), AJ, '2026-11-02');
+  assert.equal(e.diagnostico, 'progresso'); assert.equal(e.degrau, 0);
+});
+
+test('estável repete o intervalo', () => {
+  const s = [q('2026-11-01', 7, 10, { tipo: 'estudo' }), q('2026-11-02', 9), q('2026-11-09', 7)];
+  const e = C.calcularEstado(item(), s, AJ, '2026-11-09');
+  assert.equal(e.diagnostico, 'estavel'); assert.equal(e.degrau, 1); assert.equal(e.proxima, '2026-11-16');
+});
+
+test('domínio consolidado sobe dois degraus e chega a 120 dias', () => {
+  const s = [q('2026-11-01', 10, 10, { tipo: 'estudo' }), q('2026-11-02', 10), q('2026-11-09', 10)];
+  let e = C.calcularEstado(item(), s, AJ, '2026-11-09');
+  assert.equal(e.diagnostico, 'consolidado'); assert.equal(e.degrau, 3); assert.equal(e.intervalo, 30);
+  s.push(q('2026-12-09', 10));
+  e = C.calcularEstado(item(), s, AJ, '2026-12-09');
+  assert.equal(e.degrau, 5); assert.equal(e.intervalo, 120);
+  s.push(q('2027-04-08', 10));
+  assert.equal(C.calcularEstado(item(), s, AJ, '2027-04-08').intervalo, 120);
+});
+
+test('esquecimento desce um degrau quando já tinha ido bem', () => {
+  const s = [q('2026-11-01', 7, 10, { tipo: 'estudo' }), q('2026-11-02', 9), q('2026-11-09', 9), q('2026-11-24', 4)];
+  const e = C.calcularEstado(item(), s, AJ, '2026-11-24');
+  assert.equal(e.diagnostico, 'esquecimento'); assert.equal(e.degrau, 1); assert.equal(e.proxima, '2026-12-01');
+});
+
+test('dificuldade de compreensão volta para 1 dia', () => {
+  const s = [q('2026-11-01', 4, 10, { tipo: 'estudo' }), q('2026-11-02', 4)];
+  const e = C.calcularEstado(item(), s, AJ, '2026-11-02');
+  assert.equal(e.diagnostico, 'compreensao'); assert.equal(e.degrau, 0); assert.equal(e.proxima, '2026-11-03');
+});
+
+test('dificuldade recorrente pausa revisões e recomenda retomar; retomada recomeça mantendo histórico', () => {
+  const s = [q('2026-11-01', 4, 10, { tipo: 'estudo' }), q('2026-11-02', 4), q('2026-11-03', 5), q('2026-11-04', 3)];
+  let e = C.calcularEstado(item(), s, AJ, '2026-11-05');
+  assert.equal(e.status, 'retomada'); assert.equal(e.diagnostico, 'recorrente'); assert.equal(e.proxima, null);
+  const ag = C.agenda([item()], new Map([['i1', s]]), AJ, '2026-11-05');
+  assert.equal(ag.retomar.length, 1); assert.equal(ag.atrasadas.length + ag.hoje.length, 0);
+  s.push(ses({ data: '2026-11-06', tipo: 'retomada', questoes: { feitas: 10, acertos: 6 } }));
+  e = C.calcularEstado(item(), s, AJ, '2026-11-06');
+  assert.equal(e.status, 'ativo'); assert.equal(e.degrau, 0); assert.equal(e.baixasSeguidas, 0); assert.equal(e.proxima, '2026-11-07');
+  assert.equal(e.dominio.questoes, 50);   // histórico anterior continua contando
+});
+
+test('revisão adiantada conta da data da sessão; atrasada aparece com atraso', () => {
+  const s = [q('2026-11-01', 7, 10, { tipo: 'estudo' }), q('2026-11-05', 9)];   // previsto 08/11, feito 05/11
+  let e = C.calcularEstado(item(), s, AJ, '2026-11-05');
+  assert.equal(e.proxima, '2026-11-12');
+  e = C.calcularEstado(item(), s, AJ, '2026-11-15');
+  assert.equal(e.atrasoDias, 3);
+  const ag = C.agenda([item()], new Map([['i1', s]]), AJ, '2026-11-15');
+  assert.equal(ag.atrasadas.length, 1); assert.equal(ag.atrasadas[0].estado.atrasoDias, 3);
+});
+
+test('excluir uma sessão dá o mesmo estado de quem nunca a teve; mudar a data reordena', () => {
+  const ruim = q('2026-11-09', 2);
+  const comExcluida = [q('2026-11-01', 7, 10, { tipo: 'estudo' }), q('2026-11-02', 9), Object.assign({}, ruim, { excluida: true })];
+  const semNada = [q('2026-11-01', 7, 10, { tipo: 'estudo' }), q('2026-11-02', 9)];
+  const a = C.calcularEstado(item(), comExcluida, AJ, '2026-11-10'), b = C.calcularEstado(item(), semNada, AJ, '2026-11-10');
+  assert.deepEqual([a.degrau, a.proxima, a.dominio.valor, a.retencao.valor], [b.degrau, b.proxima, b.dominio.valor, b.retencao.valor]);
+  const movida = [q('2026-11-01', 7, 10, { tipo: 'estudo' }), Object.assign(q('2026-11-02', 9), { data: '2026-11-20' })];
+  assert.equal(C.calcularEstado(item(), movida, AJ, '2026-11-20').proxima, '2026-11-27');
+});
+
+test('assunto sem revisão não entra na agenda; agenda conta os próximos 7 dias', () => {
+  const itens = [item({ id: 'a' }), item({ id: 'b', tipo: 'livre', semRevisao: true }), item({ id: 'c' })];
+  const m = new Map([['a', [q('2026-11-20', 7, 10, { tipo: 'estudo' })]], ['b', [q('2026-11-20', 7, 10, { tipo: 'estudo' })]], ['c', [q('2026-11-19', 7, 10, { tipo: 'estudo' }), q('2026-11-20', 9)]]]);
+  const ag = C.agenda(itens, m, AJ, '2026-11-21');
+  assert.deepEqual(ag.hoje.map(x => x.item.id), ['a']);
+  assert.equal(ag.proximos7, 1);   // c em 27/11
+  assert.equal(C.calcularEstado(itens[1], m.get('b'), AJ, '2026-11-21').status, 'sem-revisao');
+});
