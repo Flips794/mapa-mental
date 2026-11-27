@@ -21,6 +21,7 @@ Sem instalar: `node server/server.js` e abra http://localhost:4580.
 | `dados/ws.json` | lista de mapas e documentos |
 | `dados/mapas/` | cada mapa (com anexos) |
 | `dados/documentos/`, `dados/pdfs/` | documentos e PDFs originais |
+| `dados/lixeira/` | o que foi excluído pelo app (nada é apagado de verdade; para recuperar, mova o arquivo de volta) |
 | `dados/texto/` | cópia legível `.md` de cada mapa (atualizada a cada salvamento; editar ali não altera o mapa) |
 
 Faça backup copiando a pasta `dados/`, ou pelo app: **Exportar → Tudo**. Para trazer dados de outro navegador: abra o app nele, **Exportar → Tudo**, e depois **Importar** esse arquivo em http://localhost:4580.
@@ -45,7 +46,7 @@ O conteúdo de cada mapa é um texto leve (estilo Markdown), visível na aba **�
 
 | Escrita | Significado |
 |---|---|
-| `# texto` | tópico central (uma vez) |
+| `# texto` | tópico central de uma árvore (cada `#` começa uma árvore nova no mesmo mapa) |
 | `- texto` | tópico; **2 espaços** de recuo = um nível abaixo (`Tab` / `Shift+Tab`) |
 | `> texto` | anotação do tópico logo acima |
 | `{cor, lado, recolhido}` | opcional: azul, vermelho, verde, roxo, laranja, turquesa, rosa, amarelo, anil, celeste, cinza · esquerda/direita · recolhido |
@@ -64,6 +65,7 @@ Botão de lua/sol no topo. Na primeira visita segue o tema do sistema.
 
 ### 🧠 Mapas mentais
 - Vários mapas, listados na barra lateral esquerda (criar, renomear, duplicar, excluir)
+- **Várias árvores no mesmo mapa** (como no Whimsical): botão **＋ Árvore** na barra de zoom; arraste o tópico central para mover a árvore inteira; arraste um tópico para outra árvore, ou solte-o no vazio para virar uma árvore nova
 - Tópico central com ramos dos dois lados, cada ramo com sua cor
 - Canvas livre: arraste o fundo (ou use a roda do mouse) para mover; `Ctrl + roda` para zoom
 - Arraste e solte tópicos para reorganizar; desfazer / refazer

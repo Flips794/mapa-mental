@@ -20,7 +20,7 @@ function keysHtml(){ return KEYS.map(k=>'<span>'+k[0].split(' / ').map(x=>'<kbd>
 ['#keysEmpty','#keysPanel','#keysPop'].forEach(s=>{ $(s).innerHTML=keysHtml(); });
 
 /* ================= Estado ================= */
-let M=null, curMapId=null;            // mapa aberto: {version, root, files}
+let M=null, curMapId=null;            // mapa aberto: {version:3, trees:[{root,x,y}], files} — M.root = 1ª árvore
 let selectedId=null, editingId=null, editSession=null;
 const els=new Map();
 let pos=new Map();
@@ -31,7 +31,16 @@ let mapNeedsFit=false;
 const canvas=$('#canvas'), world=$('#world'), svg=$('#links');
 
 function mk(html,color){ return {id:genId(),html:html||'',note:'',color:color||'slate',collapsed:false,attachments:[],links:[],children:[]}; }
-function mapTitle(m){ return plainText((m||M).root.html).trim() || 'Sem título'; }
+function mapTitle(m){ const mm=m||M; const r=mm.trees ? mm.trees[0].root : mm.root; return plainText(r.html).trim() || 'Sem título'; }
+/* várias árvores no mesmo mapa: M.root continua apontando para a primeira */
+function withRootAlias(m){
+  Object.defineProperty(m,'root',{get(){ return this.trees[0].root; }, set(v){ this.trees[0].root=v; }, enumerable:false, configurable:true});
+  return m;
+}
+function allRoots(){ return M.trees.map(t=>t.root); }
+function isRootNode(n){ return !!n && M.trees.some(t=>t.root===n); }
+function treeOfRoot(n){ return M.trees.find(t=>t.root===n); }
+function treeOfNode(id){ for(const t of M.trees){ if(findNode(id,t.root)) return t; } return null; }
 
 function defaultMap(){
   const root=mk('Meu Mapa Mental');
@@ -44,9 +53,9 @@ function defaultMap(){
   const c=mk('Referências','orange'); c.side='R';
   const d=mk('Pessoas','blue'); d.side='L';
   root.children=[a,b,c,d];
-  return {version:2, root, files:{}};
+  return withRootAlias({version:3, trees:[{root,x:0,y:0}], files:{}});
 }
-function blankMap(title){ const r=mk(esc(title||'Novo mapa')); return {version:2, root:r, files:{}}; }
+function blankMap(title){ const r=mk(esc(title||'Novo mapa')); return withRootAlias({version:3, trees:[{root:r,x:0,y:0}], files:{}}); }
 
 /* Converte qualquer versão (inclusive a antiga, só texto) para o formato atual */
 function normalizeMap(d){
@@ -76,17 +85,23 @@ function normalizeMap(d){
     n.children=(Array.isArray(n.children)?n.children:[]).filter(c=>c && typeof c==='object');
     n.children.forEach(fix);
   }
-  fix(d.root);
-  d.root.collapsed=false;
-  d.root.children.forEach((c,i)=>{ if(c.side!=='L' && c.side!=='R') c.side = i%2 ? 'L' : 'R'; });
-  return {version:2, root:d.root, files};
+  const srcTrees = Array.isArray(d.trees) && d.trees.length ? d.trees.filter(t=>t && t.root && typeof t.root==='object') : (d.root ? [{root:d.root,x:0,y:0}] : []);
+  if(!srcTrees.length) srcTrees.push({root:mk('Novo mapa'),x:0,y:0});
+  const trees=srcTrees.map((t,i)=>{
+    fix(t.root);
+    t.root.collapsed=false; delete t.root.side;
+    t.root.children.forEach((c,k)=>{ if(c.side!=='L' && c.side!=='R') c.side = k%2 ? 'L' : 'R'; });
+    const num=v=>typeof v==='number' && isFinite(v) ? v : null;
+    return {root:t.root, x: i===0 ? (num(t.x)??0) : num(t.x), y: i===0 ? (num(t.y)??0) : num(t.y)};
+  });
+  return withRootAlias({version:3, trees, files});
 }
 
 /* ================= Abrir / trocar de mapa ================= */
 async function mapOpen(id){
   await mapFlush();
   let data=await Store.get('map:'+id);
-  data = data && data.root ? normalizeMap(data) : defaultMap();
+  data = data && (data.root || data.trees) ? normalizeMap(data) : defaultMap();
   M=data; curMapId=id; ws.current.map=id;
   past.length=0; future.length=0; editingId=null; editSession=null;
   matches=[]; matchSet=new Set(); $('#search').value=''; $('#searchCnt').textContent='';
@@ -99,7 +114,8 @@ function mapShown(){ render(); if(mapNeedsFit){ fit(false); mapNeedsFit=false; }
 
 /* ================= Árvore ================= */
 function findNode(id, node, parent, level){
-  node=node||M.root; parent=parent||null; level=level||0;
+  if(!node){ for(const r of allRoots()){ const x=findNode(id,r,null,0); if(x) return x; } return null; }
+  parent=parent||null; level=level||0;
   if(node.id===id) return {node,parent,level};
   for(const c of node.children){ const r=findNode(id,c,node,level+1); if(r) return r; }
   return null;
@@ -109,7 +125,7 @@ function subtreeIds(n,set){ set=set||new Set(); set.add(n.id); n.children.forEac
 function colorize(n,color){ n.color=color; n.children.forEach(c=>colorize(c,color)); }
 let fastIndex=null;
 function findNodeFast(id){
-  if(!fastIndex || !fastIndex.has(id)){ fastIndex=new Map(); (function w(n){ fastIndex.set(n.id,n); n.children.forEach(w); })(M.root); }
+  if(!fastIndex || !fastIndex.has(id)){ fastIndex=new Map(); const w=n=>{ fastIndex.set(n.id,n); n.children.forEach(w); }; allRoots().forEach(w); }
   return fastIndex.get(id);
 }
 
@@ -130,7 +146,7 @@ function linkChipHtml(l){
 function render(){
   if(appMode!=='map' || !M) return;
   const seen=new Set();
-  (function walk(n,level,dir){
+  const walk=(n,level,dir)=>{
     seen.add(n.id);
     let e=els.get(n.id);
     if(!e){
@@ -142,7 +158,8 @@ function render(){
     }
     updateEl(e,n,level,dir);
     if(!n.collapsed) n.children.forEach(c=>walk(c,level+1, level===0 ? (c.side==='L'?-1:1) : dir));
-  })(M.root,0,1);
+  };
+  allRoots().forEach(r=>walk(r,0,1));
   for(const [id,e] of els){ if(!seen.has(id)){ e.remove(); els.delete(id); } }
   layout();
   updatePanel();
@@ -223,10 +240,30 @@ function layout(){
     kids.forEach(c=>{ const hh=sh(c,level+1); place(c,level+1,x,y+hh/2,dir,n.id); y+=hh+gap; });
   }
   pos=new Map();
-  const r=M.root, rs=size.get(r.id);
-  pos.set(r.id,{x:-rs.w/2,y:-rs.h/2,w:rs.w,h:rs.h,level:0,dir:1,parent:null});
-  placeKids(r, r.children.filter(c=>c.side!=='L'), 0, 1);
-  placeKids(r, r.children.filter(c=>c.side==='L'), 0, -1);
+  // cada árvore é montada em volta da sua posição (x,y = centro do tópico central)
+  const layTree=(t,ox,oy)=>{
+    const r=t.root, rs=size.get(r.id); if(!rs) return;
+    pos.set(r.id,{x:ox-rs.w/2,y:oy-rs.h/2,w:rs.w,h:rs.h,level:0,dir:1,parent:null});
+    placeKids(r, r.children.filter(c=>c.side!=='L'), 0, 1);
+    placeKids(r, r.children.filter(c=>c.side==='L'), 0, -1);
+  };
+  const treeIds=t=>{ const ids=[]; const w=n=>{ if(!pos.has(n.id)) return; ids.push(n.id); if(!n.collapsed) n.children.forEach(w); }; w(t.root); return ids; };
+  const pending=[];
+  M.trees.forEach((t,i)=>{ if(t.x==null || t.y==null){ if(i===0){ t.x=0; t.y=0; } else { pending.push(t); return; } } layTree(t,t.x,t.y); });
+  // árvores sem posição (vindas do texto/IA) entram à direita das que já existem
+  if(pending.length){
+    let x2=-Infinity; for(const p of pos.values()) x2=Math.max(x2,p.x+p.w);
+    if(!isFinite(x2)) x2=0;
+    const baseY=M.trees[0].y||0;
+    for(const t of pending){
+      layTree(t,0,0);
+      const ids=treeIds(t); let minX=Infinity, maxX=-Infinity;
+      ids.forEach(id=>{ const p=pos.get(id); minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x+p.w); });
+      const dx=x2+220-minX;
+      ids.forEach(id=>{ const p=pos.get(id); p.x+=dx; p.y+=baseY; });
+      t.x=dx; t.y=baseY; x2=maxX+dx;
+    }
+  }
 
   for(const [id,p] of pos){ const e=els.get(id); if(e){ e.style.left=p.x+'px'; e.style.top=p.y+'px'; } }
   drawLinks();
@@ -319,14 +356,15 @@ function setAllCollapsed(collapse){
   if(!M) return;
   if(editingId) endInlineEdit();
   let changed=false;
-  (function w(n){ n.children.forEach(c=>{ if(c.children.length && c.collapsed!==collapse) changed=true; w(c); }); })(M.root);
+  const chk=n=>n.children.forEach(c=>{ if(c.children.length && c.collapsed!==collapse) changed=true; chk(c); }); allRoots().forEach(chk);
   if(!changed){ toast(collapse ? 'Já está tudo recolhido.' : 'Já está tudo expandido.'); return; }
   pushHistory();
   // recolher: todo tópico com filhos fecha (o central nunca), então só os ramos principais ficam à vista
-  (function w(n){ n.children.forEach(c=>{ c.collapsed = collapse && c.children.length>0; w(c); }); })(M.root);
+  const setc=n=>n.children.forEach(c=>{ c.collapsed = collapse && c.children.length>0; setc(c); }); allRoots().forEach(setc);
   // se o tópico selecionado ficou escondido, a seleção sobe para o ramo visível que o contém
-  if(collapse && selectedId && selectedId!==M.root.id){
-    const path=[]; (function find(n,acc){ if(n.id===selectedId){ path.push(...acc); return true; } return n.children.some(c=>find(c,acc.concat(c))); })(M.root,[]);
+  if(collapse && selectedId && !isRootNode(findNodeFast(selectedId))){
+    const path=[]; const find=(n,acc)=>{ if(n.id===selectedId){ path.push(...acc); return true; } return n.children.some(c=>find(c,acc.concat(c))); };
+    allRoots().some(r=>find(r,[]));
     const firstClosed=path.slice(0,-1).find(n=>n.collapsed);
     if(firstClosed) selectedId=firstClosed.id;
   }
@@ -334,6 +372,20 @@ function setAllCollapsed(collapse){
   render(); fit(true); saveSoon();
   toast(collapse ? 'Tudo recolhido · clique no número de um ramo para abrir' : 'Tudo expandido');
 }
+/* ---------- Nova árvore no mesmo mapa ---------- */
+function addTree(){
+  if(!M) return;
+  if(editingId) endInlineEdit();
+  pushHistory();
+  let x2=-Infinity; for(const p of pos.values()) x2=Math.max(x2,p.x+p.w);
+  if(!isFinite(x2)) x2=0;
+  const root=mk('Nova árvore');
+  M.trees.push({root, x:x2+300, y:M.trees[0].y||0});
+  selectedId=root.id; fastIndex=null;
+  render(); centerOn(root.id); saveSoon();
+  startInlineEdit(root.id); selectAllIn(els.get(root.id).firstChild);
+}
+$('#addTreeBtn').addEventListener('click',addTree);
 $('#collapseAllBtn').addEventListener('click',()=>setAllCollapsed(true));
 $('#expandAllBtn').addEventListener('click',()=>setAllCollapsed(false));
 $('#keysBtn').addEventListener('click',()=>$('#keysPop').classList.toggle('hidden'));
@@ -358,15 +410,20 @@ canvas.addEventListener('pointermove',e=>{
   const dx=e.clientX-ptr.sx, dy=e.clientY-ptr.sy;
   if(ptr.mode==='pending'){
     if(Math.hypot(dx,dy)<4) return;
-    if(ptr.id && ptr.id!==M.root.id && !ptr.middle) startDrag(e); else { ptr.mode='pan'; canvas.classList.add('panning'); }
+    const pn=ptr.id && findNodeFast(ptr.id);
+    if(pn && !ptr.middle && isRootNode(pn)) startTreeMove(pn);
+    else if(pn && !ptr.middle) startDrag(e);
+    else { ptr.mode='pan'; canvas.classList.add('panning'); }
   }
   if(ptr.mode==='pan'){ view.x=ptr.vx+dx; view.y=ptr.vy+dy; applyView(); }
   else if(ptr.mode==='drag') moveDrag(e);
+  else if(ptr.mode==='tree') moveTree(dx,dy);
 });
 canvas.addEventListener('pointerup',e=>{
   if(!ptr) return;
   const p=ptr; ptr=null; canvas.classList.remove('panning');
-  if(p.mode==='drag'){ endDrag(true); return; }
+  if(p.mode==='drag'){ endDrag(true, toWorld(e.clientX,e.clientY)); return; }
+  if(p.mode==='tree'){ canvas.classList.remove('moving-tree'); saveSoon(); return; }
   if(p.mode!=='pending') return;
   if(!p.id){ selectNode(null); return; }
   const chip=p.target.closest && p.target.closest('.bd.link');
@@ -386,6 +443,24 @@ world.addEventListener('click',e=>{
   else if(h.classList.contains('fold')) toggleCollapse(id);
 });
 
+/* mover uma árvore inteira (arrastando o tópico central) — só desloca, sem remedir */
+function startTreeMove(rootNode){
+  ptr.mode='tree';
+  const t=treeOfRoot(rootNode);
+  selectNode(rootNode.id);
+  pushHistory();
+  const ids=[]; const w=n=>{ if(!pos.has(n.id)) return; ids.push(n.id); if(!n.collapsed) n.children.forEach(w); }; w(rootNode);
+  ptr.tree={t, ids, x0:t.x, y0:t.y, last:{dx:0,dy:0}};
+  canvas.classList.add('moving-tree');
+}
+function moveTree(dxScreen,dyScreen){
+  const T=ptr.tree, dx=dxScreen/view.z, dy=dyScreen/view.z;
+  const ddx=dx-T.last.dx, ddy=dy-T.last.dy; T.last={dx,dy};
+  T.t.x=T.x0+dx; T.t.y=T.y0+dy;
+  T.ids.forEach(id=>{ const p=pos.get(id), el=els.get(id); if(!p) return; p.x+=ddx; p.y+=ddy; if(el){ el.style.left=p.x+'px'; el.style.top=p.y+'px'; } });
+  drawLinks();
+}
+
 function startDrag(e){
   ptr.mode='drag';
   const id=ptr.id, f=findNode(id);
@@ -403,17 +478,21 @@ function startDrag(e){
 function moveDrag(e){
   const wp=toWorld(e.clientX,e.clientY);
   drag.ghost.style.left=(wp.x-drag.offX)+'px'; drag.ghost.style.top=(wp.y-drag.offY)+'px';
-  let best=null, bd=70;
+  let best=null, bd=70, nearest=Infinity;
   for(const [id,p] of pos){
     if(drag.sub.has(id)) continue;
     const ddx=Math.max(p.x-wp.x,0,wp.x-(p.x+p.w)), ddy=Math.max(p.y-wp.y,0,wp.y-(p.y+p.h));
     const d=Math.hypot(ddx,ddy);
+    nearest=Math.min(nearest,d);
     if(d<bd){ bd=d; best={id,p,inside:d===0}; }
   }
+  // longe de tudo: soltar aqui cria uma árvore nova
+  drag.ghost.classList.toggle('as-tree', !best && nearest>140);
+  drag.freeSpot = !best && nearest>140;
   let t=null;
   if(best){
     const {id,p}=best;
-    if(id===M.root.id) t={mode:'child', id, side: wp.x<p.x+p.w/2 ? 'L' : 'R'};
+    if(isRootNode(findNodeFast(id))) t={mode:'child', id, side: wp.x<p.x+p.w/2 ? 'L' : 'R'};
     else {
       const outer = p.dir>0 ? wp.x>p.x+p.w*0.6 : wp.x<p.x+p.w*0.4;
       const ry=(wp.y-p.y)/p.h;
@@ -437,11 +516,26 @@ function setDropIndicator(t){
     drag.line.classList.remove('hidden');
   }
 }
-function endDrag(commit){
+function endDrag(commit, wp){
   const d=drag; drag=null;
   d.ghost.remove(); d.line.remove();
   for(const el of els.values()) el.classList.remove('drag-src','drop-child');
-  if(commit && d.target) moveNode(d.id, d.target, d.sub);
+  if(!commit) return;
+  if(d.target) moveNode(d.id, d.target, d.sub);
+  else if(d.freeSpot && wp) detachAsTree(d.id, wp.x-d.offX, wp.y-d.offY);
+}
+/* tópico solto no vazio vira uma árvore nova naquele ponto */
+function detachAsTree(id, x, y){
+  const f=findNode(id); if(!f || !f.parent) return;
+  pushHistory();
+  f.parent.children.splice(f.parent.children.indexOf(f.node),1);
+  const n=f.node; delete n.side; n.collapsed=false;
+  n.children.forEach((c,i)=>{ c.side = i%2 ? 'L' : 'R'; });
+  const el=els.get(id), w=el?el.offsetWidth:120, h=el?el.offsetHeight:30;
+  M.trees.push({root:n, x:x+w/2, y:y+h/2});
+  selectedId=n.id; fastIndex=null;
+  render(); saveSoon();
+  toast('Virou uma árvore nova · Ctrl+Z desfaz');
 }
 function moveNode(id,t,sub){
   const src=findNode(id); if(!src || !src.parent) return;
@@ -453,15 +547,15 @@ function moveNode(id,t,sub){
   if(t.mode==='child'){
     newParent=findNode(t.id).node;
     newParent.children.push(src.node); newParent.collapsed=false;
-    if(newParent===M.root) src.node.side=t.side;
+    if(isRootNode(newParent)) src.node.side=t.side;
   } else {
     const tf=findNode(t.id); newParent=tf.parent;
     const i=newParent.children.indexOf(tf.node);
     newParent.children.splice(t.mode==='before'?i:i+1, 0, src.node);
-    if(newParent===M.root) src.node.side=tf.node.side;
+    if(isRootNode(newParent)) src.node.side=tf.node.side;
   }
-  if(newParent!==M.root){ delete src.node.side; if(newParent!==oldParent) colorize(src.node,newParent.color); }
-  else if(oldParent!==M.root && src.node.color==='slate') colorize(src.node,nextBranchColor());
+  if(!isRootNode(newParent)){ delete src.node.side; if(newParent!==oldParent) colorize(src.node,newParent.color); }
+  else if(!isRootNode(oldParent) && src.node.color==='slate') colorize(src.node,nextBranchColor(newParent));
   fastIndex=null;
   render(); saveSoon();
 }
@@ -515,20 +609,21 @@ world.addEventListener('focusout',e=>{
 });
 
 /* ================= Operações ================= */
-function nextBranchColor(){
-  const used={}; M.root.children.forEach(c=>used[c.color]=(used[c.color]||0)+1);
+function nextBranchColor(root){
+  root=root||M.root;
+  const used={}; root.children.forEach(c=>used[c.color]=(used[c.color]||0)+1);
   let best=BRANCH_ORDER[0], bc=Infinity;
   BRANCH_ORDER.forEach(k=>{ const u=used[k]||0; if(u<bc){ bc=u; best=k; } });
   return best;
 }
-function balancedSide(){ let l=0,r=0; M.root.children.forEach(c=>c.side==='L'?l++:r++); return l<r?'L':'R'; }
+function balancedSide(root){ let l=0,r=0; (root||M.root).children.forEach(c=>c.side==='L'?l++:r++); return l<r?'L':'R'; }
 
 function addChild(id, side){
   const f=findNode(id); if(!f) return;
   pushHistory();
-  const isRoot=f.node===M.root;
-  const c=mk('', isRoot ? nextBranchColor() : f.node.color);
-  if(isRoot) c.side = side || balancedSide();
+  const isRoot=!f.parent;
+  const c=mk('', isRoot ? nextBranchColor(f.node) : f.node.color);
+  if(isRoot) c.side = side || balancedSide(f.node);
   f.node.collapsed=false;
   f.node.children.push(c);
   selectedId=c.id; fastIndex=null;
@@ -539,14 +634,24 @@ function addSibling(id){
   if(!f.parent){ addChild(id); return; }
   pushHistory();
   const c=mk('', f.node.color);
-  if(f.parent===M.root){ c.side=f.node.side; c.color=nextBranchColor(); }
+  if(isRootNode(f.parent)){ c.side=f.node.side; c.color=nextBranchColor(f.parent); }
   f.parent.children.splice(f.parent.children.indexOf(f.node)+1,0,c);
   selectedId=c.id; fastIndex=null;
   render(); ensureVisible(c.id); startInlineEdit(c.id); saveSoon();
 }
 function deleteNode(id){
   const f=findNode(id); if(!f) return;
-  if(!f.parent){ toast('O tópico central não pode ser excluído.'); return; }
+  if(!f.parent){
+    // tópico central: exclui a árvore inteira (desde que reste pelo menos uma)
+    if(M.trees.length<2){ toast('O tópico central não pode ser excluído (é a única árvore do mapa).'); return; }
+    pushHistory();
+    const i=M.trees.findIndex(t=>t.root===f.node);
+    M.trees.splice(i,1);
+    selectedId=M.trees[Math.min(i,M.trees.length-1)].root.id; fastIndex=null;
+    render(); saveSoon();
+    toast('Árvore excluída · Ctrl+Z desfaz');
+    return;
+  }
   pushHistory();
   const sibs=f.parent.children, i=sibs.indexOf(f.node);
   sibs.splice(i,1);
@@ -571,21 +676,21 @@ function navigate(key){
   const pickNearest=list=>{ let b=null,bd=Infinity; list.forEach(c=>{ const q=pos.get(c.id); if(!q) return; const d=Math.abs(q.y+q.h/2-cy); if(d<bd){bd=d;b=c;} }); return b; };
   const toChild=wantLeft=>{
     let kids=n.children;
-    if(n===M.root) kids=kids.filter(c=>(c.side==='L')===wantLeft);
+    if(isRootNode(n)) kids=kids.filter(c=>(c.side==='L')===wantLeft);
     if(!kids.length) return;
     if(n.collapsed){ n.collapsed=false; render(); saveSoon(); }
     const c=pickNearest(kids); if(c) go(c.id);
   };
   if(key==='ArrowLeft' || key==='ArrowRight'){
     const left=key==='ArrowLeft';
-    if(n===M.root) toChild(left);
+    if(isRootNode(n)) toChild(left);
     else if((p.dir<0)===left) toChild(left);
     else go(f.parent.id);
     return;
   }
   const up=key==='ArrowUp';
   if(f.parent){
-    const sibs = f.parent===M.root ? f.parent.children.filter(c=>c.side===n.side) : f.parent.children;
+    const sibs = isRootNode(f.parent) ? f.parent.children.filter(c=>c.side===n.side) : f.parent.children;
     const i=sibs.indexOf(n), j=up?i-1:i+1;
     if(sibs[j]){ go(sibs[j].id); return; }
   }
@@ -813,11 +918,11 @@ function handleFiles(list,kind){
 
 /* ================= Desfazer / refazer ================= */
 const past=[], future=[];
-function snap(){ return {root:JSON.stringify(M.root), sel:selectedId}; }
+function snap(){ return {trees:JSON.stringify(M.trees), sel:selectedId}; }
 function pushHistory(){ past.push(snap()); if(past.length>200) past.shift(); future.length=0; updateHistoryBtns(); }
 function beginEditSession(key){ if(editSession!==key){ pushHistory(); editSession=key; } }
 function restore(s){
-  M.root=JSON.parse(s.root); fastIndex=null;
+  M.trees=JSON.parse(s.trees); fastIndex=null;
   selectedId = s.sel && findNode(s.sel) ? s.sel : (selectedId && findNode(selectedId) ? selectedId : null);
   render(); saveSoon();
 }
@@ -830,9 +935,9 @@ $('#redoBtn').addEventListener('click',redo);
 /* ================= Salvamento ================= */
 let saveTimer=null;
 function persistable(){
-  const used=new Set(); (function w(n){ n.attachments.forEach(a=>used.add(a)); n.children.forEach(w); })(M.root);
+  const used=new Set(); const w=n=>{ n.attachments.forEach(a=>used.add(a)); n.children.forEach(w); }; allRoots().forEach(w);
   const files={}; used.forEach(k=>{ if(M.files[k]) files[k]=M.files[k]; });
-  return {version:2, root:M.root, files};
+  return {version:3, trees:M.trees, files};
 }
 function saveSoon(){ fastIndex=null; outlineRefreshSoon(); setStatus('Salvando…'); clearTimeout(saveTimer); saveTimer=setTimeout(saveNow,400); }
 async function saveNow(){
@@ -882,11 +987,11 @@ $('#importFile').addEventListener('change',async e=>{
       if(!/\.json$/i.test(file.name) && !/^\s*\{/.test(raw)){
         const res=parseOutline(extractOutline(raw));
         if(!res.ok) throw new Error(res.error);
-        await createMapFromRoot(buildFromParsed(res,null).root);
+        await createMapFromRoot(buildFromParsed(res,null).trees);
       } else {
         const parsed=JSON.parse(raw);
         if(parsed && parsed.format==='mapa-mental-backup'){ await importBackup(parsed); backups++; continue; }
-        if(!parsed || !parsed.root || typeof parsed.root!=='object') throw new Error('formato');
+        if(!parsed || !(parsed.root || Array.isArray(parsed.trees))) throw new Error('formato');
         const nd=normalizeMap(parsed);
         await mapFlush();
         const id=genId();
@@ -909,10 +1014,11 @@ function runSearch(){
   const q=searchEl.value.trim().toLowerCase();
   matches=[]; matchSet=new Set(); mIdx=0;
   if(q){
-    (function walk(n,anc){
+    const walk=(n,anc)=>{
       if((plainText(n.html)+' '+plainText(n.note)).toLowerCase().includes(q)){ matches.push(n.id); anc.forEach(a=>{ a.collapsed=false; }); }
       n.children.forEach(c=>walk(c,anc.concat(n)));
-    })(M.root,[]);
+    };
+    allRoots().forEach(r=>walk(r,[]));
     matchSet=new Set(matches);
   }
   cntEl.textContent = q ? (matches.length ? '1/'+matches.length : '0') : '';

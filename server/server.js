@@ -144,7 +144,12 @@ async function handleApi(req, res, url) {
       return json(res, 200, { ok: true });
     }
     if (method === 'DELETE') {
-      await fsp.unlink(kp.file).catch(e => { if (e.code !== 'ENOENT') throw e; });
+      // nada é apagado de verdade: vai para dados/lixeira/ (dá para recuperar)
+      const trash = path.join(DATA, 'lixeira');
+      await fsp.mkdir(trash, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      await fsp.rename(kp.file, path.join(trash, `${stamp}__${key.replace(':', '_')}${path.extname(kp.file)}`))
+        .catch(e => { if (e.code !== 'ENOENT') throw e; });
       if (kp.kind === 'map') await removeMirrors(kp.id);
       return json(res, 200, { ok: true });
     }

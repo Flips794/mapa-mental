@@ -109,17 +109,22 @@ function mapToText(m){
   m=m||M;
   const out=[], ids=[];
   const push=(s,id)=>{ out.push(s); ids.push(id); };
-  push('# '+topicLine(m.root,0,null), m.root.id);
-  noteToLines(m.root.note).forEach(l=>push('> '+l, m.root.id));
-  if(m.root.children.length) push('', null);
-  (function walk(n,depth){
-    n.children.forEach(c=>{
-      const ind='  '.repeat(depth);
-      push(ind+'- '+topicLine(c,depth+1,depth===0?null:n.color), c.id);
-      noteToLines(c.note).forEach(l=>push(ind+'  > '+l, c.id));
-      walk(c,depth+1);
-    });
-  })(m.root,0);
+  const trees = m.trees || [{root:m.root}];
+  trees.forEach((t,ti)=>{
+    const r=t.root;
+    if(ti>0){ push('', null); }
+    push('# '+topicLine(r,0,null), r.id);
+    noteToLines(r.note).forEach(l=>push('> '+l, r.id));
+    if(r.children.length) push('', null);
+    (function walk(n,depth){
+      n.children.forEach(c=>{
+        const ind='  '.repeat(depth);
+        push(ind+'- '+topicLine(c,depth+1,depth===0?null:n.color), c.id);
+        noteToLines(c.note).forEach(l=>push(ind+'  > '+l, c.id));
+        walk(c,depth+1);
+      });
+    })(r,0);
+  });
   return {text:out.join('\n')+'\n', ids};
 }
 
@@ -146,9 +151,10 @@ function parseOutline(text){
   const lines=(text||'').replace(/\r/g,'').split('\n');
   const P=(raw,line)=>Object.assign(parseTopicText(raw),{noteLines:[],children:[],line});
   let root=null, synthetic=false, base=null, last=null, inFence=false;
+  const roots=[];
   const stack=[], headings=[];
   const lineNodes=new Array(lines.length).fill(null);
-  const ensureRoot=()=>{ if(!root){ root=P('',-1); synthetic=true; base=root; headings[0]=root; } };
+  const ensureRoot=()=>{ if(!root){ root=P('',-1); synthetic=true; base=root; headings[0]=root; roots.push(root); } };
   lines.forEach((line,i)=>{
     if(/^\s*```/.test(line)){ inFence=!inFence; return; }
     if(!line.trim()) return;
@@ -156,7 +162,12 @@ function parseOutline(text){
     if((m=line.match(/^\s*>\s?(.*)$/))){ ensureRoot(); (last||root).noteLines.push(m[1]); lineNodes[i]=last||root; return; }
     if((m=line.match(/^\s{0,3}(#{1,6})\s+(.*)$/))){
       const h=m[1].length, n=P(m[2],i);
-      if(h===1 && (!root || (synthetic && !root.children.length && !root.noteLines.length))){ root=n; synthetic=false; base=root; headings.length=0; headings[0]=root; stack.length=0; }
+      if(h===1){
+        // "# " = tópico central de uma árvore (o primeiro, ou uma árvore nova no mesmo mapa)
+        if(root && synthetic && roots.length===1 && !root.children.length && !root.noteLines.length){ roots[0]=n; synthetic=false; }
+        else { if(roots.length===1 && synthetic) synthetic=true; roots.push(n); }
+        root=n; base=root; headings.length=0; headings[0]=root; stack.length=0;
+      }
       else {
         ensureRoot();
         const depth=Math.max(1,h-1);
@@ -174,23 +185,29 @@ function parseOutline(text){
     parent.children.push(n); stack.push({indent,node:n});
     last=n; lineNodes[i]=n;
   });
-  if(!root) return {ok:false, error:'Nenhum tópico encontrado no texto.'};
-  if(synthetic){
-    const k=root.children;
-    if(k.length===1 && !root.noteLines.length){ root=k[0]; synthetic=false; }
+  if(!roots.length) return {ok:false, error:'Nenhum tópico encontrado no texto.'};
+  // só a 1ª árvore pode não ter "# título" (texto colado de fora)
+  let first=roots[0];
+  if(synthetic && first.line===-1){
+    const k=first.children;
+    if(k.length===1 && !first.noteLines.length){ first=k[0]; synthetic=false; }
     // "Título" solto na primeira linha (sem filhos) seguido de ramos: ele é o tópico central
-    else if(k.length>1 && !root.noteLines.length && !k[0].children.length && !k[0].noteLines.length && k.slice(1).some(c=>c.children.length)){
-      const title=k.shift(); title.children=k; root=title; synthetic=false;
+    else if(k.length>1 && !first.noteLines.length && !k[0].children.length && !k[0].noteLines.length && k.slice(1).some(c=>c.children.length)){
+      const title=k.shift(); title.children=k; first=title; synthetic=false;
     }
-  }
-  return {ok:true, root, synthetic, lineNodes};
+    roots[0]=first;
+  } else synthetic=false;
+  return {ok:true, roots, root:roots[0], synthetic, lineNodes};
 }
-function countParsed(p){ let k=1; p.children.forEach(c=>k+=countParsed(c)); return k; }
+function countParsed(p){ if(p && p.roots) return p.roots.reduce((a,r)=>a+countParsed(r),0); let k=1; p.children.forEach(c=>k+=countParsed(c)); return k; }
 
 /* Monta a árvore final reaproveitando os tópicos existentes (mantém anexos, ids e links) */
-function buildFromParsed(res, oldRoot){
+/* old: null (mapa novo), um tópico central (formato antigo) ou a lista de árvores do mapa atual */
+function buildFromParsed(res, old){
+  const oldTrees = !old ? [] : Array.isArray(old) ? old : [{root:old, x:0, y:0}];
+  const oldRoot = oldTrees.length ? oldTrees[0].root : null;
   const used=new Set(), warnings=[];
-  const oldAll=[]; if(oldRoot) (function w(n,parent){ oldAll.push({n,parent}); n.children.forEach(c=>w(c,n)); })(oldRoot,null);
+  const oldAll=[]; oldTrees.forEach(t=>(function w(n,parent){ oldAll.push({n,parent}); n.children.forEach(c=>w(c,n)); })(t.root,null));
   const key=s=>plainText(s).replace(/\s+/g,' ').trim().toLowerCase();
   const pkey=p=>key(mdInline(p.text));
   function matchKids(pk, ok){
@@ -215,7 +232,7 @@ function buildFromParsed(res, oldRoot){
     idOf.set(p,n.id);
     n.html=mdInline(p.text);
     // texto sem "# título": o mapa mantém o nome que já tinha (nunca fica "Sem título")
-    if(level===0 && res.synthetic && isEmptyHtml(n.html)) n.html = (oldRoot && !isEmptyHtml(oldRoot.html)) ? oldRoot.html : 'Mapa mental';
+    if(level===0 && res.synthetic && p===res.roots[0] && isEmptyHtml(n.html)) n.html = (oldRoot && !isEmptyHtml(oldRoot.html)) ? oldRoot.html : 'Mapa mental';
     n.note=linesToNote(p.noteLines);
     n.links=resolveLinks(p);
     n.collapsed = level>0 && !!p.collapsed;
@@ -228,18 +245,27 @@ function buildFromParsed(res, oldRoot){
     n.children = p.children.map((c,i)=>build(c, matched[i], level+1, n.color));
     return n;
   }
-  if(oldRoot) used.add(oldRoot.id);
-  const root=build(res.root, oldRoot, 0, null);
-  // cores e lados padrão para tópicos principais novos
-  const usedColors={}; root.children.forEach(c=>{ if(c.color) usedColors[c.color]=(usedColors[c.color]||0)+1; });
-  let l=0,r=0; root.children.forEach(c=>{ if(c.side==='L') l++; else if(c.side==='R') r++; });
-  root.children.forEach(c=>{
-    if(!c.color){ let best=BRANCH_ORDER[0],bc=Infinity; BRANCH_ORDER.forEach(k=>{ const u=usedColors[k]||0; if(u<bc){bc=u;best=k;} }); c.color=best; usedColors[best]=(usedColors[best]||0)+1; (function w(n){ n.children.forEach(k=>{ if(!k.color||k.color==='slate') k.color=best; w(k); }); })(c); }
-    if(!c.side){ c.side = l<r ? 'L' : 'R'; c.side==='L'?l++:r++; }
+  // cada árvore do texto reaproveita a árvore antiga de mesmo título (ou mesma posição) — mantém id e lugar no canvas
+  const roots = res.roots || [res.root];
+  const trees = roots.map((pr,i)=>{
+    const k=pkey(pr);
+    let ot = oldTrees.find(t=>!used.has(t.root.id) && k && key(t.root.html)===k) || (oldTrees[i] && !used.has(oldTrees[i].root.id) ? oldTrees[i] : null);
+    if(ot) used.add(ot.root.id);
+    const root=build(pr, ot ? ot.root : null, 0, null);
+    return {root, x: ot ? ot.x : (i===0 ? 0 : null), y: ot ? ot.y : (i===0 ? 0 : null)};
   });
-  (function fix(n,pc){ n.children.forEach(c=>{ if(!c.color) c.color=pc; fix(c,c.color); }); })(root,'slate');
+  trees.forEach(({root})=>{
+    // cores e lados padrão para tópicos principais novos
+    const usedColors={}; root.children.forEach(c=>{ if(c.color) usedColors[c.color]=(usedColors[c.color]||0)+1; });
+    let l=0,r=0; root.children.forEach(c=>{ if(c.side==='L') l++; else if(c.side==='R') r++; });
+    root.children.forEach(c=>{
+      if(!c.color){ let best=BRANCH_ORDER[0],bc=Infinity; BRANCH_ORDER.forEach(k=>{ const u=usedColors[k]||0; if(u<bc){bc=u;best=k;} }); c.color=best; usedColors[best]=(usedColors[best]||0)+1; (function w(n){ n.children.forEach(k=>{ if(!k.color||k.color==='slate') k.color=best; w(k); }); })(c); }
+      if(!c.side){ c.side = l<r ? 'L' : 'R'; c.side==='L'?l++:r++; }
+    });
+    (function fix(n,pc){ n.children.forEach(c=>{ if(!c.color) c.color=pc; fix(c,c.color); }); })(root,'slate');
+  });
   const lineIds=res.lineNodes.map(p=>p?idOf.get(p)||null:null);
-  return {root, lineIds, warnings};
+  return {trees, root:trees[0].root, lineIds, warnings};
 }
 
 /* ---------- Painel "Texto" ---------- */
@@ -300,8 +326,8 @@ function applyTextFromEditor(){
   const res=parseOutline(mapTextEl.value);
   if(!res.ok){ setPtStatus('⚠ '+res.error,true); return false; }
   beginEditSession('text');
-  const b=buildFromParsed(res,M.root);
-  M.root=b.root; fastIndex=null; textLineIds=b.lineIds;
+  const b=buildFromParsed(res,M.trees);
+  M.trees=b.trees; fastIndex=null; textLineIds=b.lineIds;
   if(!selectedId || !findNode(selectedId)) selectedId=M.root.id;
   render(); saveSoon();
   setPtStatus(b.warnings.length ? '⚠ link não encontrado: '+b.warnings[0] : '✓ mapa atualizado', b.warnings.length>0);
@@ -405,7 +431,7 @@ const FORMAT_RULES =
 - Outro tópico principal {azul, esquerda}
 
 Regras:
-- Use "#" uma única vez, só no tópico central.
+- "#" marca o tópico central de uma árvore. Normalmente o mapa tem uma árvore só; para criar mais de uma árvore no mesmo mapa, comece cada uma com sua própria linha "#".
 - Cada tópico ocupa UMA linha que começa com "- ". Recue 2 espaços para cada nível abaixo.
 - Anotações (explicações longas) vão em linhas iniciadas com ">" logo abaixo do tópico.
 - Opcional no fim da linha, entre chaves: cor (azul, vermelho, verde, roxo, laranja, turquesa, rosa, amarelo, anil, celeste, cinza), lado (esquerda ou direita, só nos tópicos principais) e "recolhido".
@@ -439,7 +465,7 @@ function updateAiPreview(){
   else {
     const res=parseOutline(extractOutline(txt));
     if(!res.ok){ aiPreview.textContent='⚠ '+res.error; aiPreview.classList.add('err'); }
-    else { aiParsed=res; aiPreview.textContent='✓ '+countParsed(res.root)+' tópicos · central: “'+(plainText(mdInline(res.root.text))||'sem título')+'”'; aiPreview.classList.add('ok'); }
+    else { aiParsed=res; const nt=res.roots.length; aiPreview.textContent='✓ '+countParsed(res)+' tópicos'+(nt>1?' em '+nt+' árvores':'')+' · central: “'+(plainText(mdInline(res.root.text))||'sem título')+'”'; aiPreview.classList.add('ok'); }
   }
   $('#aiApply').disabled=!aiParsed; $('#aiNew').disabled=!aiParsed;
 }
@@ -448,20 +474,22 @@ $('#aiApply').addEventListener('click',()=>{
   if(!aiParsed) return;
   if(editingId) endInlineEdit();
   pushHistory();
-  const b=buildFromParsed(aiParsed,M.root);
-  M.root=b.root; fastIndex=null; selectedId=M.root.id;
+  const b=buildFromParsed(aiParsed,M.trees);
+  M.trees=b.trees; fastIndex=null; selectedId=M.root.id;
   render(); fit(true); saveSoon(); outlineRefresh(true);
   closeAi(); toast('Mapa atualizado pela IA · Ctrl+Z desfaz');
 });
 $('#aiNew').addEventListener('click',async ()=>{
   if(!aiParsed) return;
   const b=buildFromParsed(aiParsed,null);
-  await createMapFromRoot(b.root);
+  await createMapFromRoot(b.trees);
   closeAi(); toast('Novo mapa criado.');
 });
-async function createMapFromRoot(root){
+/* aceita um tópico central (1 árvore) ou a lista de árvores */
+async function createMapFromRoot(rootOrTrees){
   await mapFlush();
-  const id=genId(), data={version:2, root, files:{}};
+  const trees = Array.isArray(rootOrTrees) ? rootOrTrees : [{root:rootOrTrees, x:0, y:0}];
+  const id=genId(), data={version:3, trees, files:{}};
   await Store.set('map:'+id,data);
   ws.items.push({id,type:'map',title:mapTitle(data),updated:Date.now()});
   await wsSave();
@@ -479,7 +507,7 @@ function exportMd(){
 async function importTextMap(text){
   const res=parseOutline(extractOutline(text));
   if(!res.ok){ toast(res.error); return; }
-  await createMapFromRoot(buildFromParsed(res,null).root);
+  await createMapFromRoot(buildFromParsed(res,null).trees);
   toast('Mapa importado do texto.');
 }
 
@@ -529,7 +557,7 @@ async function importBackup(obj){
     if(!it || typeof it.id!=='string' || !SAFE_ID.test(it.id) || (it.type!=='map' && it.type!=='doc')) continue;
     if(have.has(it.id)){ skipped++; continue; }
     if(it.type==='map'){
-      const d=obj.maps && obj.maps[it.id]; if(!d || !d.root) continue;
+      const d=obj.maps && obj.maps[it.id]; if(!d || !(d.root || Array.isArray(d.trees))) continue;
       const m=normalizeMap(d);
       if(!await Store.set('map:'+it.id,m)) continue;
       ws.items.push({id:it.id, type:'map', title:mapTitle(m), updated:Date.now()});

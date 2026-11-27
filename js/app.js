@@ -90,7 +90,7 @@ async function renameItem(it){
   const t=name.trim(); if(!t) return;
   if(it.type==='map'){
     if(it.id===curMapId){ pushHistory(); M.root.html=esc(t); fastIndex=null; render(); await saveNow(); }
-    else { const d=await Store.get('map:'+it.id); if(d&&d.root){ const n=normalizeMap(d); n.root.html=esc(t); await Store.set('map:'+it.id,n); } it.title=t; await wsSave(); }
+    else { const d=await Store.get('map:'+it.id); if(d&&(d.root||d.trees)){ const n=normalizeMap(d); n.root.html=esc(t); await Store.set('map:'+it.id,{version:3,trees:n.trees,files:n.files}); } it.title=t; await wsSave(); }
   } else {
     if(it.id===curDocId){ docTitleEl.value=t; await docSaveNow(); }
     else { const d=await Store.get('doc:'+it.id); if(d){ d.title=t; await Store.set('doc:'+it.id,d); } it.title=t; await wsSave(); }
@@ -103,7 +103,7 @@ async function duplicateItem(it){
   const key=it.type+':'+it.id, data=await Store.get(key); if(!data) return;
   const copy=JSON.parse(JSON.stringify(data)), id=genId();
   const title=(it.title||'Sem título')+' (cópia)';
-  if(it.type==='map'){ copy.root.html=esc(title); }
+  if(it.type==='map'){ if(Array.isArray(copy.trees) && copy.trees[0]) copy.trees[0].root.html=esc(title); else if(copy.root) copy.root.html=esc(title); }
   else copy.title=title;
   await Store.set(it.type+':'+id, copy);
   const meta=Object.assign({},it,{id,title,updated:Date.now()});
@@ -199,7 +199,7 @@ function showOnlineBanner(){
 async function buildMissingMirrors(){
   const have=new Set(await Store.textIds());
   for(const it of ws.items.filter(i=>i.type==='map' && !have.has(i.id))){
-    try{ const d=await Store.get('map:'+it.id); if(d && d.root){ const m=normalizeMap(d); await Store.setText(it.id, mapTitle(m), mapToText(m).text); } }catch(e){}
+    try{ const d=await Store.get('map:'+it.id); if(d && (d.root||d.trees)){ const m=normalizeMap(d); await Store.setText(it.id, mapTitle(m), mapToText(m).text); } }catch(e){}
   }
 }
 

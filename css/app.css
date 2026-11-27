@@ -126,6 +126,8 @@ main{flex:1;display:flex;min-height:0}
 .node.drag-src{opacity:.25}
 .node.drop-child{outline:2px dashed var(--ring);outline-offset:4px}
 .ghost{pointer-events:none;opacity:.92;box-shadow:0 10px 28px rgba(15,23,42,.22)!important;z-index:50;background:var(--surface)}
+.ghost.as-tree{outline:2px dashed var(--ring);outline-offset:6px;border-radius:10px}
+#canvas.moving-tree,#canvas.moving-tree .node{cursor:move}
 .drop-line{position:absolute;height:3px;margin-top:-1.5px;background:var(--ring);border-radius:2px;pointer-events:none;z-index:49}
 
 /* zoom */
