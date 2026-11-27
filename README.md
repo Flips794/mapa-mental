@@ -114,6 +114,7 @@ Botão **Estudos** no topo. Tudo fica junto com os mapas (no GitHub, em `estudos
 - **Ajustes**: todos os parâmetros (escada, limites, pesos) com "restaurar padrões"; o histórico é sempre recalculado, nada é apagado
 - Editar ou excluir um registro recalcula tudo e guarda as versões anteriores. Sem internet, o registro fica no navegador e sobe sozinho depois; dois aparelhos podem registrar ao mesmo tempo sem perder nada
 - O backup completo (`.json`) inclui os Estudos
+- Pendências e próximas melhorias: [docs/pendencias-estudos.md](docs/pendencias-estudos.md)
 
 ## ⌨️ Atalhos do mapa
 
